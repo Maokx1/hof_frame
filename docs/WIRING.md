@@ -64,6 +64,40 @@ replace the module with a 100 kΩ upper resistor, 33 kΩ lower resistor, and
 100 nF ADC filter capacitor. That circuit scales 0–6.0 V to approximately
 0–1.49 V and draws about 36 µA at 4.8 V.
 
+## Estimated runtime per charged pack
+
+With four matched Green Cell 950 mAh AAA NiMH cells, the series pack is
+950 mAh at approximately 4.8 V nominal (4.56 Wh). For the specified profile
+of one received photo every 14 days and one full panel refresh every 24 hours,
+the preliminary estimate is **one to two months per charged pack**. Plan for
+**about six weeks** until it is measured on the final hardware.
+
+This estimate includes 14 scheduled refreshes and one BLE/photo-transfer wake
+per 14-day period. It assumes approximately 750 mAh remains usable before the
+loaded low-battery cutoff, about 90% converter efficiency, an estimated
+1 W/30 s full refresh, and a five-minute BLE wake averaging 50–100 mA at the
+pack. The S9V11F5's low-load current and this PoC's 128 µA sensor module also
+consume capacity continuously. Actual ESP32 deep-sleep current, refresh
+energy, BLE current, and cutoff-limited capacity remain unmeasured.
+
+The preliminary input-side budget for one 14-day photo interval is:
+
+| Component | Assumption | Estimated pack use |
+|---|---|---:|
+| Scheduled full refreshes | 14 refreshes at 1 W for 30 s, 90% converter efficiency | ~27 mAh |
+| S9V11F5 and PoC sensor-module idle draw | 0.2 mA regulator quiescent current plus 0.128 mA divider current for 14 days | ~110 mAh |
+| BLE/photo-transfer wake | One five-minute wake averaging 50–100 mA at the pack | ~250–500 mAh |
+| **Subtotal** | Excludes the ESP32 controller deep-sleep current | **~387–637 mAh** |
+
+Measure these values at the switched battery-holder input, before the
+protector and converter, so the final result includes losses from the complete
+power path.
+
+The five-minute BLE window is the largest uncertainty and likely lifetime
+limiter; reduce it after measuring normal photo-transfer duration. Do not use
+this estimate for a battery replacement schedule until it has been confirmed
+by a full discharge test through this complete power path.
+
 ## Connection schedule
 
 | From | To | Connection | Status / requirement |
@@ -116,7 +150,7 @@ bench supply before connecting the controller.
 | 1 | 1 | Good Display GDEP133C02, 13.3-inch, 1600×1200 Spectra 6 panel | Includes or uses the matching display cable |
 | 2 | 1 | Good Display ESP32-133C02 controller with ESP32-S3-WROOM-1 | Confirm usable PSRAM/flash and the 5 V/VBUS input |
 | 3 | 1 | 4× AAA NiMH holder with integrated switch | Use the planned Allegro holder; retain cell-removal access |
-| 4 | 4 | Matched AAA/R03 NiMH cells, approximately 750–1000 mAh | Remove cells for charging in a dedicated 4-cell NiMH charger |
+| 4 | 4 | Matched Green Cell AAA/R03 950 mAh NiMH cells | Remove cells for charging in a dedicated 4-cell NiMH charger |
 | 5 | 1 | Pololu #5382 ideal-diode reverse-voltage protector | Connect between switched holder output and converter |
 | 6 | 1 | Pololu S9V11F5 step-up/step-down converter | Adjust/verify regulated output at 5.0 V before connection |
 | 7 | 1 | [Passive 0–25 V, 5:1 DC voltage-sensor module](https://phippselectronics.com/product/25v-voltage-sensor-module/) | PoC battery-voltage measurement; verify its actual resistor values and ratio |

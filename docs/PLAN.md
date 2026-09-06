@@ -10,7 +10,7 @@ Build a Hall of Fame frame around a 13.3-inch GDEP133C02 Spectra 6 color e-ink d
 - Controller: Good Display ESP32-133C02 with ESP32-S3-WROOM-1.
 - Memory assumption: 8 MB PSRAM and 16 MB flash; confirm usable configuration during bring-up.
 - Wake button: SW2, provisionally assigned to GPIO12. Confirm active level, pull arrangement, and RTC wake suitability against the board schematic.
-- Battery: four matched AAA (R03) NiMH cells in a series holder, initially targeting approximately 750–1000 mAh cells.
+- Battery: four matched Green Cell AAA (R03) 950 mAh NiMH cells in a series holder. The series pack is 950 mAh at approximately 4.8 V nominal (4.56 Wh nominal).
 - Battery holder: [Allegro 4×AAA holder with integrated switch](https://allegro.pl/produkt/koszyk-na-4-baterie-aaa-4xaaa-z-wlacznikiem-czarny-4c5bce7c-e839-49d4-b6d2-8abc42cdc347?offerId=17382812988).
 - Reverse-polarity protection: [Pololu Ideal Diode Reverse Voltage Protector #5382](https://www.pololu.com/product/5382).
 - Voltage converter: [Pololu S9V11F5 5 V step-up/step-down converter](https://www.pololu.com/product/2836).
@@ -31,6 +31,35 @@ flowchart TD
 The four-cell pack is approximately 4.8 V nominal and may be close to 6 V immediately after charging. The S9V11F5 accepts the pack's voltage range and regulates the controller supply. A fuse or resettable PTC is optional overcurrent protection, not a voltage-compatibility requirement. The USB-C input must not be back-fed into a computer or charger.
 
 The holder listing and board specifications must be checked against the physical parts when received. Record measured dimensions, switch behavior, wiring, current draw, display timing, and battery runtime separately from these assumptions.
+
+### Battery-runtime target
+
+The intended usage profile is one received photo every 14 days and one
+mandatory full panel refresh every 24 hours. The first engineering estimate
+for the PoC power path is **one to two months per charged pack**; design for
+**about six weeks** until input-side measurements replace it. This is not a
+measured result.
+
+The daily refresh is not expected to be the largest drain. The planned
+five-minute BLE receive window for each photo is the principal lifetime
+limiter, so measure actual transfer duration and reduce that timeout before
+finalizing the production behavior. The runtime calculation must use the
+measured energy for 14 scheduled refreshes, one BLE/photo-transfer wake, and
+the continuous sleep load over each 14-day interval. Use cutoff-limited
+capacity, rather than the 950 mAh rating, as the available capacity.
+
+The preliminary input-side budget for one 14-day interval is:
+
+| Component | Assumption | Estimated pack use |
+|---|---|---:|
+| Scheduled full refreshes | 14 refreshes at 1 W for 30 s, 90% conversion efficiency | ~27 mAh |
+| S9V11F5 and PoC sensor-module idle draw | 0.2 mA regulator quiescent current plus 0.128 mA divider current for 14 days | ~110 mAh |
+| BLE/photo-transfer wake | One five-minute wake averaging 50–100 mA at the pack | ~250–500 mAh |
+| **Subtotal** | Excludes the ESP32 controller deep-sleep current | **~387–637 mAh** |
+
+These figures are engineering assumptions, not measurements. The display
+refresh estimate includes the controller and panel during a refresh, but the
+BLE and continuous-load figures must be verified at the switched holder input.
 
 Define a conservative low-battery cutoff for the pack. Measure the minimum loaded pack voltage at which the reverse-polarity protector, S9V11F5, and controller still start reliably, then prevent a new wake/transfer cycle below that threshold and return to deep sleep. The cutoff must be based on measured loaded voltage, not only nominal NiMH voltage.
 
@@ -75,7 +104,7 @@ Target the ESP32-S3-WROOM-1 using an ESP-IDF-backed Rust project with NimBLE for
 ```mermaid
 flowchart TD
     A["Deep sleep"]
-    B["Wake and initialize<br/>SW2 / GPIO12"]
+    B["Wake for photo receive<br/>SW2 / GPIO12"]
     C["BLE advertising<br/>and image receive"]
     D{"Image transfer starts<br/>within five minutes?"}
     E["Return to deep sleep"]
@@ -83,24 +112,28 @@ flowchart TD
     G{"Image valid and complete?"}
     H["Render image"]
     I["Preserve last valid screen"]
+    J["24-hour RTC wake"]
+    K["Refresh persisted frame<br/>BLE disabled"]
 
     A -->|SW2 / GPIO12| B --> C --> D
     D -->|No| E
     D -->|Yes| F --> G
     G -->|Yes| H --> E
     G -->|No or interrupted| I --> E
+    A -->|Timer| J --> K --> E
 ```
 
 Required behavior:
 
-1. Wake from deep sleep using SW2/GPIO12 and identify the wake cause.
-2. Initialize BLE and advertise an image-transfer service.
-3. Start a five-minute idle timer on wake/advertising.
+1. Wake from deep sleep using SW2/GPIO12 or the 24-hour RTC timer and identify the wake cause.
+2. On a button wake, initialize BLE and advertise an image-transfer service.
+3. Start a five-minute idle timer on BLE advertising, then reduce it after measuring real transfer duration.
 4. Cancel the timer when a valid image transfer starts.
 5. Receive and validate a complete image.
-6. Decode, resize or crop to exactly 1600×1200, apply the required Spectra 6 color conversion and dithering, and render only a complete, decodable, integrity-checked image.
-7. Return to deep sleep after rendering or after an invalid/interrupted transfer.
-8. Keep no previous image in flash or PSRAM after a successful render; the e-ink panel itself remains visible while the device sleeps. A failed transfer leaves the current panel contents unchanged.
+6. Decode, resize or crop to exactly 1600×1200, apply the required Spectra 6 color conversion and dithering, persist a display-ready frame, and render only a complete, decodable, integrity-checked image.
+7. On an RTC wake, refresh the persisted frame with BLE disabled, then return to deep sleep.
+8. Below the measured low-battery threshold, do not start a BLE transfer or display refresh; return to deep sleep.
+9. A failed transfer leaves the current persisted frame and panel contents unchanged.
 
 ## BLE image transfer
 
@@ -114,7 +147,7 @@ Required behavior:
 - Decode only after the complete encoded image has been received and validated.
 - Reject images whose decoded width, height, pixel count, or working-memory requirement exceeds configured decoder limits, regardless of encoded size. This prevents decompression bombs and oversized malformed images from exhausting RAM.
 - Stretch or crop every accepted image to exactly 1600×1200, then map pixels to the display's Spectra 6 palette with mandatory dithering.
-- Store only the current encoded transfer in bounded temporary memory. Discard it after successful rendering; do not persist the previous image in flash or PSRAM.
+- Store only the current encoded transfer in bounded temporary memory. Discard it after successful rendering, but retain the display-ready frame in non-volatile storage so the mandatory 24-hour refresh can reproduce it. Update that stored frame atomically only after complete image validation.
 
 The final protocol still needs concrete UUIDs, metadata layout, chunk size, hash/CRC choice, and transfer-inactivity timeout.
 
@@ -123,10 +156,12 @@ The final protocol still needs concrete UUIDs, metadata layout, chunk size, hash
 1. Confirm the ESP32-S3-WROOM-1 configuration, board GPIO map, display bus, SW2/GPIO12 wake polarity, PSRAM, flash layout, and BLE support.
 2. Create a minimal ESP-IDF-backed Rust project that builds, can be flashed during development, logs the wake cause, and enters/exits deep sleep.
 3. Bring up the display with a simple test pattern and validate the refresh sequence.
-4. Implement BLE advertising and the five-minute receive window.
-5. Implement the chunked PNG/JPEG transfer with the 4 MiB guardrail.
-6. Decode, color-map, and render one validated image.
-7. Measure startup, display-refresh, BLE, idle, and deep-sleep current.
+4. Implement SW2 and 24-hour RTC wake handling, including the low-battery behavior for scheduled refreshes.
+5. Implement BLE advertising and the receive window; measure and reduce the five-minute timeout.
+6. Implement the chunked PNG/JPEG transfer with the 4 MiB guardrail.
+7. Decode, color-map, atomically persist, and render one validated image.
+8. Refresh the persisted frame after an RTC wake with BLE disabled.
+9. Measure startup, display-refresh, BLE, idle, and deep-sleep current.
 
 Developer flashing is required during implementation, but end-user firmware flashing and replacement procedures are intentionally deferred.
 
