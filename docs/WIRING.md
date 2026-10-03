@@ -16,8 +16,8 @@ flowchart LR
     end
 
     subgraph REG["Regulated supply"]
-        C["Pololu S9V11F5<br/>5.0 V output"]
-        E["EN input<br/>(optional hard cutoff)"]
+        C["Pololu S9V11MACMA #2868<br/>5.0 V output"]
+        E["Built-in EN cutoff<br/>(adjustable pot)"]
     end
 
     subgraph CTRL["Controller"]
@@ -34,7 +34,7 @@ flowchart LR
     P -->|"protected BAT− / GND"| G
     C -->|"GND"| G
     H -. "BAT+ sense before #5382" .-> D
-    E -. "optional supervisor output holds EN low" .-> C
+    C --- E
     W --> B
     B -->|"supplied display cable; verify connector/pinout"| X["GDEP133C02<br/>1600×1200 Spectra 6"]
 ```
@@ -55,7 +55,7 @@ connection. A typical 5:1 module produces 0.96 V from a 4.8 V pack and 1.2 V
 from a 6.0 V pack, which is suitable for the ESP32-S3 ADC input. Confirm the
 actual divider ratio and that its maximum output is within the confirmed ADC
 input range before connecting it. Keep its output wire away from the
-S9V11F5 switching node.
+S9V11MACMA switching node.
 
 Typical 0–25 V modules use a 30 kΩ and 7.5 kΩ divider, drawing approximately
 128 µA from a 4.8 V pack. This is acceptable for the PoC but is a permanent
@@ -76,7 +76,7 @@ This estimate includes 14 scheduled refreshes and one BLE/photo-transfer wake
 per 14-day period. It assumes approximately 750 mAh remains usable before the
 loaded low-battery cutoff, about 90% converter efficiency, an estimated
 1 W/30 s full refresh, and a five-minute BLE wake averaging 50–100 mA at the
-pack. The S9V11F5's low-load current and this PoC's 128 µA sensor module also
+pack. The S9V11MACMA's low-load current and this PoC's 128 µA sensor module also
 consume capacity continuously. Actual ESP32 deep-sleep current, refresh
 energy, BLE current, and cutoff-limited capacity remain unmeasured.
 
@@ -85,7 +85,7 @@ The preliminary input-side budget for one 14-day photo interval is:
 | Component | Assumption | Estimated pack use |
 |---|---|---:|
 | Scheduled full refreshes | 14 refreshes at 1 W for 30 s, 90% converter efficiency | ~27 mAh |
-| S9V11F5 and PoC sensor-module idle draw | 0.2 mA regulator quiescent current plus 0.128 mA divider current for 14 days | ~110 mAh |
+| S9V11MACMA and PoC sensor-module idle draw | 0.2 mA regulator quiescent current plus 0.128 mA divider current for 14 days | ~110 mAh |
 | BLE/photo-transfer wake | One five-minute wake averaging 50–100 mA at the pack | ~250–500 mAh |
 | **Subtotal** | Excludes the ESP32 controller deep-sleep current | **~387–637 mAh** |
 
@@ -104,10 +104,10 @@ by a full discharge test through this complete power path.
 |---|---|---|---|
 | Holder BAT+ after switch | #5382 VIN+ | Switched battery positive | Required |
 | Holder BAT− | #5382 VIN− and system GND | Battery return | Required |
-| #5382 VOUT+ | S9V11F5 VIN+ | Protected battery positive | Required |
-| #5382 VOUT− | S9V11F5 VIN−/GND | Protected battery return | Required |
-| S9V11F5 VOUT+ | ESP32-133C02 5 V/VBUS input | Regulated 5 V | Verify board label and polarity |
-| S9V11F5 GND | ESP32-133C02 GND | Common return | Required |
+| #5382 VOUT+ | S9V11MACMA VIN+ | Protected battery positive | Required |
+| #5382 VOUT− | S9V11MACMA VIN−/GND | Protected battery return | Required |
+| S9V11MACMA VOUT+ | ESP32-133C02 5 V/VBUS input | Regulated 5 V | Verify board label and polarity |
+| S9V11MACMA GND | ESP32-133C02 GND | Common return | Required |
 | Holder BAT+ after switch | Voltage-sensor module VIN/+ | Battery measurement source | Must be before #5382 |
 | Holder BAT− | Voltage-sensor module GND/− | Measurement return | Common system ground |
 | Voltage-sensor module VOUT/S | Confirmed spare ESP32-S3 ADC input | Pack-voltage sense | Confirm output range, ratio, and GPIO in board schematic |
@@ -124,8 +124,8 @@ battery converter and USB supply are not simultaneously driving the same rail.
 1. Install matched, removable AAA NiMH cells only after all continuity checks.
 2. With the controller disconnected, verify holder polarity, switch operation,
    and continuity through the #5382 protector.
-3. Set the S9V11F5 output to 5.0 V if adjustment is required. Measure it with
-   the battery connected and no controller load.
+3. Set the S9V11MACMA output to 5.0 V with its output potentiometer. Measure
+   it with the battery connected and no controller load.
 4. Confirm the controller input pin and ground from the ESP32-133C02
    documentation, then connect the regulated output.
 5. Confirm the ADC reading against a multimeter at at least two known pack
@@ -133,15 +133,41 @@ battery converter and USB supply are not simultaneously driving the same rail.
 6. Characterize startup and display-refresh reliability while lowering the
    loaded pack voltage. Set the firmware cutoff above the measured failure
    point with engineering margin.
-7. On wake, sample the pack before BLE or display work. Below the cutoff,
-   skip the transfer and return to deep sleep.
+7. On wake, sample the pack before BLE or display work. Below the firmware
+   threshold, skip the transfer and display refresh. The converter's built-in
+   cutoff remains the primary protection.
 
-The ADC check does not prevent the converter from briefly starting before the
-MCU samples. If a hard cutoff is required, add a low-power adjustable
-supervisor or resistor-set comparator powered from the switched battery. Its
-open-drain output must hold the S9V11F5 EN pin low below the characterized
-threshold, with hysteresis to prevent chatter. Validate this circuit on a
-bench supply before connecting the controller.
+The S9V11MACMA has a built-in low-voltage cutoff: its input voltage feeds the
+EN pin through the cutoff potentiometer, and the converter sleeps when EN falls
+below 0.7 V. No separate monitor board is needed. The ADC check is only a
+secondary firmware safeguard and cannot protect the pack before the MCU
+samples.
+
+To set the cutoff:
+
+1. With the controller disconnected, power the board from a bench supply or
+   the cells and set the output to 5.0 V.
+2. Measure VIN and EN, then turn the cutoff potentiometer until
+   `EN / 0.7 V = VIN / VIN_cutoff`. Clockwise raises the cutoff. For example,
+   with VIN = 5.4 V and a 4.4 V target, EN should be about 0.86 V.
+3. Verify by lowering a bench supply until the output switches off.
+
+Start with about 4.4 V for the four-cell pack (1.1 V/cell); this is a test
+value, not a Green Cell specification. Choose the final threshold above the
+cell discharge limit and above the minimum voltage at which the protector,
+converter, or controller becomes unreliable, with margin confirmed under load.
+The regulator needs 3 V to start and runs down to 2 V.
+
+The cutoff is **not latching**. The converter restarts when EN rises above
+0.8 V, i.e. when VIN reaches about 114% of the cutoff (about 5.0 V for a 4.4 V
+cutoff). Cells recover somewhat once the load stops; verify with real
+discharged cells that the pack stays below the restart voltage and the
+converter does not repeatedly restart. In sleep, the board still draws about
+7 µA per volt on VIN, so switch off the holder or remove the cells for
+prolonged storage. A four-cell series voltage only reports the sum, so it
+cannot identify a weak individual cell: keep the cells matched, charge and
+replace them as a set, and use per-cell monitoring if protection of each cell
+is required.
 
 ## Bill of materials
 
@@ -152,25 +178,24 @@ bench supply before connecting the controller.
 | 3 | 1 | 4× AAA NiMH holder with integrated switch | Use the planned Allegro holder; retain cell-removal access |
 | 4 | 4 | Matched Green Cell AAA/R03 950 mAh NiMH cells | Remove cells for charging in a dedicated 4-cell NiMH charger |
 | 5 | 1 | Pololu #5382 ideal-diode reverse-voltage protector | Connect between switched holder output and converter |
-| 6 | 1 | Pololu S9V11F5 step-up/step-down converter | Adjust/verify regulated output at 5.0 V before connection |
+| 6 | 1 | [Pololu S9V11MACMA #2868](https://www.pololu.com/product/2868) step-up/step-down converter with adjustable low-voltage cutoff | Set output to 5.0 V and cutoff (start ~4.4 V) before connection; not latching |
 | 7 | 1 | [Passive 0–25 V, 5:1 DC voltage-sensor module](https://phippselectronics.com/product/25v-voltage-sensor-module/) | PoC battery-voltage measurement; verify its actual resistor values and ratio |
 | 8 | 1 set | Insulated hookup wire, suitable gauge, heat-shrink, and labels | Keep power and signal wiring short and strain-relieved |
 | 9 | 1 | Dedicated charger for four NiMH cells | Required; do not use TP4056 or a constant-voltage charger |
 | 10 | 1 | Multimeter and current-limited bench supply | Bring-up and loaded-voltage cutoff characterization |
 | 11 | 1 | Optional fuse or resettable PTC | Extra overcurrent protection; choose rating after measured load |
-| 12 | 1 | Optional low-power voltage supervisor/comparator with adjustable threshold | Only for a hard battery cutoff through S9V11F5 EN |
 
 Items 1–6 are the primary assembly. Item 7 is required for PoC firmware
 battery monitoring. Items 8–10 are assembly/service equipment rather than
-frame electronics; items 11–12 are optional and must not be fitted without
-validating their effect on converter startup and sleep current.
+frame electronics; item 11 is optional. Validate the converter's cutoff and
+restart behavior with real cells before regular battery use.
 
 ## Assembly notes
 
 - Keep the battery holder accessible so cells can be removed for charging.
 - Provide access to the holder switch and enough bend radius for the supplied
   display cable.
-- Secure the #5382 and S9V11F5 so their terminals cannot contact the frame or
+- Secure the #5382 and S9V11MACMA so their terminals cannot contact the frame or
   display backplane.
 - Label BAT+, protected BAT+, regulated +5 V, and GND before final assembly.
 - Record measured dimensions, switch behavior, loaded voltages, current,
