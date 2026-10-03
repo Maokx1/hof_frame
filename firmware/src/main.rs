@@ -12,7 +12,7 @@ use esp_idf_svc::hal::peripherals::Peripherals;
 use esp_idf_svc::hal::reset::{ResetReason, WakeupReason};
 use esp_idf_svc::hal::sleep::{rtc::RtcWakeLevel, DeepSleep};
 
-/// Provisional SW2 wake button pin; confirm against the board schematic.
+/// SW2 wake button pin (active-high per Good Display documentation).
 const WAKE_BUTTON_GPIO: &str = "GPIO12";
 
 fn main() {
@@ -31,11 +31,11 @@ fn main() {
 
     let peripherals = Peripherals::take().expect("peripherals already taken");
 
-    // SW2 is assumed active-low (pressed pulls the pin to GND), so enable the
-    // internal pull-up and wake while the pin reads low. Confirm the actual
-    // active level and pull arrangement on the physical board. The pin must
-    // be RTC-capable to remain configured as a deep-sleep wakeup source.
-    let wake_pin = PinDriver::rtc_input(peripherals.pins.gpio12, Pull::Up)
+    // Good Display documents SW2 (IO12) as active-high, so enable the internal
+    // pull-down and wake while the pin reads high. Confirm on the physical
+    // board that it is the revision with SW2-SW4 fitted and whether an external
+    // pull-down exists. GPIO12 is RTC-capable on the ESP32-S3.
+    let wake_pin = PinDriver::rtc_input(peripherals.pins.gpio12, Pull::Down)
         .expect("failed to configure GPIO12 as an RTC input");
 
     log::info!("wake source configured on {WAKE_BUTTON_GPIO}; entering placeholder init window");
@@ -49,7 +49,7 @@ fn main() {
 
     DeepSleep::new()
         .expect("failed to reset wakeup sources")
-        .wakeup_on_rtc(&wake_pin, RtcWakeLevel::AllLow)
+        .wakeup_on_rtc(&wake_pin, RtcWakeLevel::AnyHigh)
         .expect("failed to configure RTC GPIO wakeup")
         .enter();
 }

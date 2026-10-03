@@ -8,10 +8,11 @@ See `../docs/PLAN.md` for the full project plan and firmware milestones.
 ## Current status: milestone 2
 
 The firmware boots, logs the reset reason and deep-sleep wakeup cause, and
-demonstrates a full deep-sleep cycle waking on SW2 (provisionally GPIO12,
-active-low with internal pull-up; confirm against the board schematic).
+demonstrates a full deep-sleep cycle waking on SW2 (GPIO12, active-high per
+Good Display documentation, so the firmware uses an internal pull-down; confirm
+on the physical board, including that the SW2-SW4 board revision is fitted).
 Later milestones will replace the placeholder init delay with display
-bring-up, BLE advertising, and the five-minute idle timer.
+bring-up, the Wi-Fi access point and upload page, and the five-minute idle timer.
 
 ## Prerequisites
 
