@@ -12,9 +12,8 @@ flowchart LR
     subgraph BAT["Battery and protection"]
         H["4× AAA NiMH holder<br/>integrated switch"]
         F["Optional fuse/PTC"]
-        P["Pololu #5382<br/>ideal-diode reverse-polarity protector"]
     end
-    SD["Schottky diode<br/>(USB / battery isolation)"]
+    SD["Schottky diode 1N5822<br/>(USB / battery isolation)"]
 
     subgraph REG["Regulated supply"]
         C["Pololu S9V11MACMA #2868<br/>5.0 V output"]
@@ -30,11 +29,10 @@ flowchart LR
     D["Off-the-shelf<br/>voltage-divider module"] --> A
     D --> G
 
-    H -->|"BAT+ switched"| F --> P --> C -->|"regulated +5 V"| SD --> B
+    H -->|"BAT+ switched"| F --> C -->|"regulated +5 V"| SD --> B
     H -->|"BAT−"| G
-    P -->|"protected BAT− / GND"| G
     C -->|"GND"| G
-    H -. "BAT+ sense before #5382" .-> D
+    H -. "BAT+ sense before converter" .-> D
     C --- E
     W --> B
     B -->|"supplied display cable; verify connector/pinout"| X["GDEP133C02<br/>1600×1200 Spectra 6"]
@@ -97,15 +95,14 @@ The preliminary input-side budget for one 14-day photo interval is:
 | **Subtotal of known terms** | | **~145–154 mAh** |
 | ESP32-133C02 board sleep current | Whole board on its 5 V input (regulators, USB-UART, level shifters, SD slot), not just the ESP32-S3 | **Unmeasured**; each 0.1 mA adds ~34 mAh |
 | NiMH self-discharge | Depends on cell type | **Unmeasured** |
-| #5382 protector and Schottky diode quiescent/leakage | | **Unmeasured** |
+| Schottky diode reverse leakage | | **Unmeasured**, expected small |
 
 The unmeasured board sleep current can dominate everything else; measure it
 first. The six-week planning figure leaves about 100 mAh per 14 days (about
 0.3 mA continuous) for the unmeasured items.
 
 Measure these values at the switched battery-holder input, before the
-protector and converter, so the final result includes losses from the complete
-power path.
+converter, so the final result includes losses from the complete power path.
 
 Do not use this estimate for a battery replacement schedule until it has been
 confirmed by a full discharge test through this complete power path.
@@ -119,14 +116,12 @@ next refresh restores the picture.
 
 | From | To | Connection | Status / requirement |
 | --- | --- | --- | --- |
-| Holder BAT+ after switch | #5382 VIN+ | Switched battery positive | Required |
-| Holder BAT− | #5382 VIN− and system GND | Battery return | Required |
-| #5382 VOUT+ | S9V11MACMA VIN+ | Protected battery positive | Required |
-| #5382 VOUT− | S9V11MACMA VIN−/GND | Protected battery return | Required |
-| S9V11MACMA VOUT+ | Schottky diode anode | Regulated 5 V | Diode rated above peak refresh current, low forward drop |
-| Schottky diode cathode | ESP32-133C02 5 V/VBUS input | Regulated 5 V (minus diode drop) | Verify board label and polarity; confirm the controller runs reliably with the drop |
+| Holder BAT+ after switch | S9V11MACMA VIN+ | Switched battery positive | Required |
+| Holder BAT− | S9V11MACMA VIN−/GND and system GND | Battery return | Required |
+| S9V11MACMA VOUT+ | 1N5822 Schottky diode anode | Regulated 5 V | Diode is 3 A, 40 V; band (cathode) toward the controller |
+| 1N5822 cathode | ESP32-133C02 5 V/VBUS input | Regulated 5 V (minus about 0.4–0.5 V diode drop) | Verify board label and polarity; confirm the controller runs reliably with the drop, else raise the converter output slightly |
 | S9V11MACMA GND | ESP32-133C02 GND | Common return | Required |
-| Holder BAT+ after switch | Voltage-sensor module VIN/+ | Battery measurement source | Must be before #5382 |
+| Holder BAT+ after switch | Voltage-sensor module VIN/+ | Battery measurement source | Battery side, before the converter |
 | Holder BAT− | Voltage-sensor module GND/− | Measurement return | Common system ground |
 | Voltage-sensor module VOUT/S | Confirmed spare ESP32-S3 ADC input | Pack-voltage sense | No spare ADC pin identified yet (candidates GPIO1/4/10 are not in the documented pin table); confirm one is broken out, plus output range and ratio |
 | SW2 | GPIO12 | Wake input, active-high per Good Display; RTC-capable | Needs the board revision with SW2–SW4 fitted; confirm on the schematic whether an external pull-down exists, else use the internal pull-down |
@@ -145,7 +140,7 @@ the sleep-current budget.
 
 1. Install matched, removable AAA NiMH cells only after all continuity checks.
 2. With the controller disconnected, verify holder polarity, switch operation,
-   and continuity through the #5382 protector.
+   and continuity to the converter input.
 3. Set the S9V11MACMA output to 5.0 V with its output potentiometer. Measure
    it with the battery connected and no controller load.
 4. Confirm the controller input pin and ground from the ESP32-133C02
@@ -176,8 +171,8 @@ To set the cutoff:
 
 Start with about 4.4 V for the four-cell pack (1.1 V/cell); this is a test
 value, not a Green Cell specification. Choose the final threshold above the
-cell discharge limit and above the minimum voltage at which the protector,
-converter, or controller becomes unreliable, with margin confirmed under load.
+cell discharge limit and above the minimum voltage at which the
+converter or controller becomes unreliable, with margin confirmed under load.
 The regulator needs 3 V to start and runs down to 2 V.
 
 The cutoff is **not latching**. The converter restarts when EN rises above
@@ -193,34 +188,34 @@ is required.
 
 ## Bill of materials
 
-| Item | Qty. | Part / specification | Notes |
-| --- | ---: | --- | --- |
-| 1 | 1 | Good Display GDEP133C02, 13.3-inch, 1600×1200 Spectra 6 panel | Includes or uses the matching display cable |
-| 2 | 1 | Good Display ESP32-133C02 controller with ESP32-S3-WROOM-1 | Confirm usable PSRAM/flash and the 5 V/VBUS input |
-| 3 | 1 | 4× AAA NiMH holder with integrated switch | Use the planned Allegro holder; retain cell-removal access |
-| 4 | 4 | Matched Green Cell AAA/R03 950 mAh NiMH cells | Remove cells for charging in a dedicated 4-cell NiMH charger |
-| 5 | 1 | Pololu #5382 ideal-diode reverse-voltage protector | Connect between switched holder output and converter |
-| 6 | 1 | [Pololu S9V11MACMA #2868](https://www.pololu.com/product/2868) step-up/step-down converter with adjustable low-voltage cutoff | Set output to 5.0 V and cutoff (start ~4.4 V) before connection; not latching |
-| 7 | 1 | [Passive 0–25 V, 5:1 DC voltage-sensor module](https://phippselectronics.com/product/25v-voltage-sensor-module/) | PoC battery-voltage measurement; verify its actual resistor values and ratio |
-| 8 | 1 set | Insulated hookup wire, suitable gauge, heat-shrink, and labels | Keep power and signal wiring short and strain-relieved |
-| 9 | 1 | Dedicated charger for four NiMH cells | Required; do not use TP4056 or a constant-voltage charger |
-| 10 | 1 | Multimeter and current-limited bench supply | Bring-up and loaded-voltage cutoff characterization |
-| 11 | 1 | Optional fuse or resettable PTC | Extra overcurrent protection; choose rating after measured load |
-| 12 | 1 | Schottky diode | In series between converter output and controller 5 V input; rating above peak refresh current, low forward drop |
+Items marked "owned" are already in the maker's stock and need not be ordered.
 
-Items 1–6 are the primary assembly. Item 7 is required for PoC firmware
-battery monitoring. Items 8–10 are assembly/service equipment rather than
-frame electronics; item 11 is optional. Item 12 is required to isolate the converter from USB power. Validate the converter's cutoff and
-restart behavior with real cells before regular battery use.
+| Item | Qty. | Part / specification | Status | Notes |
+| --- | ---: | --- | --- | --- |
+| 1 | 1 | Good Display GDEP133C02 panel with ESP32-133C02 controller (ESP32-S3-WROOM-1), as the paired development kit | To order | Panel and board come together; confirm the 5 V/VBUS input during bring-up |
+| 2 | 1 | 4× AAA battery holder with integrated switch (Allegro listing) | To order | Retain cell-removal access |
+| 3 | 1 | [Pololu S9V11MACMA #2868](https://www.pololu.com/product/2868) step-up/step-down converter with adjustable low-voltage cutoff | To order | Set output to 5.0 V and cutoff (start ~4.4 V) before connection; not latching. Ships without terminals or headers |
+| 4 | 1 | 1N5822 Schottky diode (3 A, 40 V, DO-201AD through-hole) | To order | Series diode between converter output and controller 5 V input; band toward the controller |
+| 5 | 1 | [Passive 0–25 V, 5:1 DC voltage-sensor module](https://phippselectronics.com/product/25v-voltage-sensor-module/) | To order | PoC battery-voltage measurement; verify its actual resistor values and ratio |
+| 6 | 4 | AAA NiMH cells (matched set; plan assumed Green Cell 950 mAh) | Owned | Charge and replace as a set; spare sets available for swapping |
+| 7 | 1 | Charger for NiMH cells | Owned | Do not use TP4056 or a constant-voltage charger |
+| 8 | 1 set | Hookup wire, heat-shrink, labels, soldering iron | Owned | Keep power and signal wiring short and strain-relieved |
+| 9 | 1 | USB cable for flashing and development power | Owned | |
+| 10 | 1 | Multimeter | Owned | Bring-up, current and loaded-voltage measurements |
+| 11 | 1 | Optional fuse or resettable PTC | Optional | Choose rating after measured load |
+
+Items 1–5 are the order list. A reverse-polarity protector was removed from the
+design because the holder fixes the polarity. Validate the converter's cutoff
+and restart behavior with real cells before regular battery use.
 
 ## Assembly notes
 
 - Keep the battery holder accessible so cells can be removed for charging.
 - Provide access to the holder switch and enough bend radius for the supplied
   display cable.
-- Secure the #5382 and S9V11MACMA so their terminals cannot contact the frame or
+- Secure the S9V11MACMA and the diode so their terminals cannot contact the frame or
   display backplane.
-- Label BAT+, protected BAT+, regulated +5 V, and GND before final assembly.
+- Label BAT+, regulated +5 V, and GND before final assembly.
 - Record measured dimensions, switch behavior, loaded voltages, current,
   display refresh timing, wireless reliability, and runtime separately from
   this provisional wiring plan.

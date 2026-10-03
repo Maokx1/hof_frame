@@ -10,10 +10,10 @@ Build a Hall of Fame frame around a 13.3-inch GDEP133C02 Spectra 6 color e-ink d
 - Controller: Good Display ESP32-133C02 with ESP32-S3-WROOM-1.
 - Memory: 16 MB flash and 8 MB octal PSRAM, corroborated by third-party research of Good Display's firmware (not yet measured on this board); confirm usable configuration during bring-up.
 - Wake button: SW2 on GPIO12, documented by Good Display as **active-high** (reads high when pressed). GPIO12 is an RTC-capable pin on the ESP32-S3, so it can wake from deep sleep. SW2–SW4 exist only on the board revision with the three onboard buttons; confirm the received board has them, and check against the schematic whether an external pull-down is fitted (otherwise use the internal pull-down).
-- Spare ADC input for battery sensing: **not yet identified**. The board's documented pin table uses nearly every exposed GPIO (display, microSD, buttons, UART, USB). The ESP32-S3 ADC1 pins GPIO1, GPIO4 and GPIO10 are not in that table, but whether any is broken out must be checked on the schematic/headers before the divider is wired.
+- Spare ADC input for battery sensing: **not yet identified**. The board's documented pin table uses nearly every exposed GPIO (display, microSD, buttons, UART, USB). The ESP32-S3 ADC1 pins GPIO1, GPIO4 and GPIO10 are not in that table, but whether any is broken out must be checked on the schematic/headers before the divider is wired. This is not a blocker for ordering. If no pin is accessible, a fallback is to desolder an unused onboard part (for example the SW3 or SW4 button on GPIO13/GPIO14) and use that pad. Those are ADC2 pins, which are unreliable while Wi-Fi is running, so sample the battery before starting Wi-Fi (as the plan already requires).
 - Battery: four matched Green Cell AAA (R03) 950 mAh NiMH cells in a series holder. The series pack is 950 mAh at approximately 4.8 V nominal (4.56 Wh nominal).
 - Battery holder: [Allegro 4×AAA holder with integrated switch](https://allegro.pl/produkt/koszyk-na-4-baterie-aaa-4xaaa-z-wlacznikiem-czarny-4c5bce7c-e839-49d4-b6d2-8abc42cdc347?offerId=17382812988).
-- Reverse-polarity protection: [Pololu Ideal Diode Reverse Voltage Protector #5382](https://www.pololu.com/product/5382).
+- Reverse-polarity protection: none. The battery holder fixes the cell polarity, so a protector module was dropped to keep the first build simple and to save its quiescent current and voltage drop.
 - Voltage converter: [Pololu S9V11MACMA #2868](https://www.pololu.com/product/2868), a step-up/step-down converter set to 5.0 V with a built-in adjustable low-voltage cutoff.
 - Charging: remove the cells and use a dedicated four-cell NiMH charger. Do not use a Li-ion TP4056 charger or an improvised constant-voltage charger.
 
@@ -22,14 +22,14 @@ Build a Hall of Fame frame around a 13.3-inch GDEP133C02 Spectra 6 color e-ink d
 ```mermaid
 flowchart TD
     A["4× AAA NiMH switched holder"]
-    B["Pololu #5382<br/>reverse-polarity protector"]
     C["Pololu S9V11MACMA<br/>5 V converter with<br/>adjustable low-voltage cutoff"]
+    S["Schottky diode<br/>1N5822"]
     D["ESP32-133C02<br/>5 V / VBUS input"]
 
-    A --> B --> C --> D
+    A --> C --> S --> D
 ```
 
-The four-cell pack is approximately 4.8 V nominal and may be close to 6 V immediately after charging. The S9V11MACMA accepts the pack's voltage range and regulates the controller supply. A fuse or resettable PTC is optional overcurrent protection, not a voltage-compatibility requirement. The USB-C input must not be back-fed into a computer or charger. A Schottky diode in series with the converter output (converter VOUT+ to the controller's 5 V input) isolates the converter from USB power. It does not by itself stop the battery rail from energizing the USB connector's VBUS if the board ties VBUS to its 5 V input; check the schematic, or keep the holder switch off while USB is connected. Choose a diode rated above the peak refresh current with low forward drop, and verify that the controller still runs reliably with the drop (about 0.3–0.5 V below 5.0 V) at low battery.
+The four-cell pack is approximately 4.8 V nominal and may be close to 6 V immediately after charging. The S9V11MACMA accepts the pack's voltage range and regulates the controller supply. A fuse or resettable PTC is optional overcurrent protection, not a voltage-compatibility requirement. The USB-C input must not be back-fed into a computer or charger. A 1N5822 Schottky diode (3 A, 40 V, through-hole) in series with the converter output (converter VOUT+ to the controller's 5 V input) isolates the converter from USB power. During development the board is powered over USB-C with the display attached; the battery path is wired up later. It does not by itself stop the battery rail from energizing the USB connector's VBUS if the board ties VBUS to its 5 V input; check the schematic, or keep the holder switch off while USB is connected. The 1N5822 drops roughly 0.4–0.5 V at an amp or so, so the board sees about 4.5–4.6 V. Verify during bring-up that the controller and panel run reliably with that drop; if not, raise the converter output slightly.
 
 The S9V11MACMA provides the hardware low-battery cutoff: its input voltage
 feeds the EN pin through an 11-turn cutoff potentiometer, and the converter
@@ -91,7 +91,7 @@ The preliminary input-side budget for one 14-day interval is:
 | **Subtotal of known terms** | | **~145–154 mAh** |
 | ESP32-133C02 board sleep current | Whole board on its 5 V input (regulators, USB-UART, level shifters, SD slot), not just the ESP32-S3 | **Unmeasured**; each 0.1 mA adds ~34 mAh |
 | NiMH self-discharge | Depends on cell type | **Unmeasured** |
-| #5382 protector and Schottky diode quiescent/leakage | | **Unmeasured** |
+| Schottky diode reverse leakage | | **Unmeasured**, expected small |
 
 At ~750 mAh usable, the known terms alone give about 5.2 intervals (about 10
 weeks). The unmeasured board sleep current can dominate everything else, so
@@ -101,11 +101,11 @@ These figures are engineering assumptions, not measurements. The display
 refresh estimate includes the controller and panel during a refresh, but the
 Wi-Fi and continuous-load figures must be verified at the switched holder input.
 
-Define a conservative low-battery cutoff for the pack. Measure the minimum loaded pack voltage at which the reverse-polarity protector, S9V11MACMA, and controller still start reliably, then prevent a new wake/transfer cycle below that threshold; the converter's built-in cutoff disables its output. The cutoff must be based on measured loaded voltage, not only nominal NiMH voltage.
+Define a conservative low-battery cutoff for the pack. Measure the minimum loaded pack voltage at which the S9V11MACMA and controller still start reliably, then prevent a new wake/transfer cycle below that threshold; the converter's built-in cutoff disables its output. The cutoff must be based on measured loaded voltage, not only nominal NiMH voltage.
 
 ### Battery-voltage measurement and cutoff circuit
 
-Measure the pack on the switched-holder side of the power path, before the #5382 protector and converter. Use a high-impedance divider to a confirmed spare ESP32-S3 ADC input:
+Measure the pack on the switched-holder side of the power path, before the converter. Use a high-impedance divider to a confirmed spare ESP32-S3 ADC input:
 
 ```text
 Battery+ after holder switch ── 100 kΩ ──┬── ADC input
@@ -119,7 +119,7 @@ Add approximately 100 nF from the ADC input to ground. The divider scales a 0–
 
 Characterize the cutoff with a bench supply or a discharged matched cell pack:
 
-1. Connect a current-limited supply through the holder switch, protector, and S9V11MACMA. Start at a fully charged pack voltage.
+1. Connect a current-limited supply through the holder switch and S9V11MACMA. Start at a fully charged pack voltage.
 2. Log pack voltage at the holder, converter 5 V output, controller reset state, Wi-Fi startup, and display refresh while lowering the input in small steps.
 3. Repeat the test during the highest expected load, including Wi-Fi activity and a display refresh. Record the lowest voltage at which startup and refresh remain reliable.
 4. Set the firmware low-battery threshold above the measured failure point with engineering margin. On wake, sample the pack before starting Wi-Fi; below the threshold, skip the transfer and return to deep sleep.
@@ -130,7 +130,7 @@ The ADC check is a secondary firmware safeguard; it cannot protect the cells
 before the MCU samples the voltage. Set the S9V11MACMA output to 5.0 V first,
 then set its cutoff by measuring VIN and EN and adjusting the cutoff
 potentiometer so that `EN / 0.7 V = VIN / VIN_cutoff`. Set the threshold above
-both the pack-equivalent cell discharge limit and the converter/protector
+both the pack-equivalent cell discharge limit and the converter
 minimum operating voltage (the regulator needs 3 V to start and runs down to
 2 V), with margin confirmed by loaded testing. Because the cutoff is not
 latching, verify with a bench supply and real cells that unloaded voltage
@@ -169,7 +169,7 @@ The physical design and fit-check prototype are considered complete for planning
 - Display panel and front bezel.
 - ESP32-133C02 board and display cable.
 - Battery holder with cell-removal access and switch access.
-- #5382 protector, S9V11MACMA converter, wiring, and cable bend radius.
+- S9V11MACMA converter, Schottky diode, wiring, and cable bend radius.
 - Rear cover, service access, and wall/stand mounting.
 
 ## Firmware behavior
@@ -302,5 +302,4 @@ Clearly label provisional assumptions versus confirmed specifications and measur
 - [ESP32-133C02 product page](https://www.good-display.com/product/574.html)
 - [ESP32-133C02 specification](https://www.good-display.com/companyfile/2035.html)
 - [Pololu S9V11MACMA #2868](https://www.pololu.com/product/2868)
-- [Pololu ideal-diode protector #5382](https://www.pololu.com/product/5382)
 - [4×AAA switched holder](https://allegro.pl/produkt/koszyk-na-4-baterie-aaa-4xaaa-z-wlacznikiem-czarny-4c5bce7c-e839-49d4-b6d2-8abc42cdc347?offerId=17382812988)
