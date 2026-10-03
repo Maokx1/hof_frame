@@ -167,7 +167,7 @@ To set the cutoff:
 2. Measure VIN and EN, then turn the cutoff potentiometer until
    `EN / 0.7 V = VIN / VIN_cutoff`. Clockwise raises the cutoff. For example,
    with VIN = 5.4 V and a 4.4 V target, EN should be about 0.86 V.
-3. Verify by lowering a bench supply until the output switches off.
+3. Verify by running real cells down under load (or with a bench supply, if one is available) until the output switches off.
 
 Start with about 4.4 V for the four-cell pack (1.1 V/cell); this is a test
 value, not a Green Cell specification. Choose the final threshold above the
@@ -188,25 +188,35 @@ is required.
 
 ## Bill of materials
 
-Items marked "owned" are already in the maker's stock and need not be ordered.
+### To order
 
-| Item | Qty. | Part / specification | Status | Notes |
-| --- | ---: | --- | --- | --- |
-| 1 | 1 | Good Display GDEP133C02 panel with ESP32-133C02 controller (ESP32-S3-WROOM-1), as the paired development kit | To order | Panel and board come together; confirm the 5 V/VBUS input during bring-up |
-| 2 | 1 | 4× AAA battery holder with integrated switch (Allegro listing) | To order | Retain cell-removal access |
-| 3 | 1 | [Pololu S9V11MACMA #2868](https://www.pololu.com/product/2868) step-up/step-down converter with adjustable low-voltage cutoff | To order | Set output to 5.0 V and cutoff (start ~4.4 V) before connection; not latching. Ships without terminals or headers |
-| 4 | 1 | 1N5822 Schottky diode (3 A, 40 V, DO-201AD through-hole) | To order | Series diode between converter output and controller 5 V input; band toward the controller |
-| 5 | 1 | [Passive 0–25 V, 5:1 DC voltage-sensor module](https://phippselectronics.com/product/25v-voltage-sensor-module/) | To order | PoC battery-voltage measurement; verify its actual resistor values and ratio |
-| 6 | 4 | AAA NiMH cells (matched set; plan assumed Green Cell 950 mAh) | Owned | Charge and replace as a set; spare sets available for swapping |
-| 7 | 1 | Charger for NiMH cells | Owned | Do not use TP4056 or a constant-voltage charger |
-| 8 | 1 set | Hookup wire, heat-shrink, labels, soldering iron | Owned | Keep power and signal wiring short and strain-relieved |
-| 9 | 1 | USB cable for flashing and development power | Owned | |
-| 10 | 1 | Multimeter | Owned | Bring-up, current and loaded-voltage measurements |
-| 11 | 1 | Optional fuse or resettable PTC | Optional | Choose rating after measured load |
+| Item | Qty. | Part / specification | Notes |
+| --- | ---: | --- | --- |
+| 1 | 1 | Good Display GDEP133C02 panel with ESP32-133C02 controller (ESP32-S3-WROOM-1), as the paired development kit | Panel and board come together; confirm the 5 V/VBUS input during bring-up |
+| 2 | 1 | 4× AAA battery holder with integrated switch (Allegro listing) | Retain cell-removal access; confirm the listing has a switch and takes AAA cells |
+| 3 | 1 | [Pololu S9V11MACMA #2868](https://www.pololu.com/product/2868) step-up/step-down converter with adjustable low-voltage cutoff | Set output to 5.0 V and cutoff (start ~4.4 V) before connection; not latching. Ships without terminals or headers |
+| 4 | 1 | 1N5822 Schottky diode (3 A, 40 V, DO-201AD through-hole) | Series diode between converter output and controller 5 V input; band toward the controller |
+| 5 | 1 | [Passive 0–25 V, 5:1 DC voltage-sensor module](https://phippselectronics.com/product/25v-voltage-sensor-module/) | PoC battery-voltage measurement; verify its actual resistor values and ratio |
 
-Items 1–5 are the order list. A reverse-polarity protector was removed from the
-design because the holder fixes the polarity. Validate the converter's cutoff
-and restart behavior with real cells before regular battery use.
+### Already owned (do not order)
+
+| Item | Qty. | Part / specification | Notes |
+| --- | ---: | --- | --- |
+| 6 | 4 | AAA NiMH cells (matched set; plan assumed Green Cell 950 mAh) | Charge and replace as a set; spare sets available for swapping |
+| 7 | 1 | Charger for NiMH cells | Do not use TP4056 or a constant-voltage charger |
+| 8 | 1 set | Hookup wire, heat-shrink, labels, soldering iron | Keep power and signal wiring short and strain-relieved |
+| 9 | 1 | USB cable for flashing and development power | |
+| 10 | 1 | Multimeter | Bring-up, current and loaded-voltage measurements |
+
+### Optional
+
+| Item | Qty. | Part / specification | Notes |
+| --- | ---: | --- | --- |
+| 11 | 1 | Fuse or resettable PTC | Choose rating after measured load |
+
+A reverse-polarity protector was removed from the design because the holder
+fixes the polarity. Validate the converter's cutoff and restart behavior with
+real cells before regular battery use.
 
 ## Assembly notes
 
