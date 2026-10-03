@@ -1,0 +1,1045 @@
+{
+  "name": "hof_frame",
+  "description": "Battery -> S9V11MACMA -> 1N5822 -> ESP32-133C02, plus pack-voltage sense.",
+  "tstamps": "/hof_frame-129636824561856/",
+  "source_file": "hof_frame.kicad_sch",
+  "components": {
+    "J1": {
+      "symbol": "Connector_Generic:Conn_01x02",
+      "ref": "J1",
+      "value": "4xAAA holder",
+      "footprint": "Connector_PinHeader_2.54mm:PinHeader_1x02_P2.54mm_Vertical",
+      "datasheet": "~",
+      "description": "Generic connector, single row, 01x02, script generated (kicad-library-utils/schlib/autogen/connector/)",
+      "properties": {
+        "ki_fp_filters": "Connector*:*_1x??_*"
+      },
+      "_extra_fields": {
+        "ki_fp_filters": "Connector*:*_1x??_*"
+      },
+      "pins": [
+        {
+          "pin_id": "1",
+          "name": "Pin_1",
+          "func": "passive",
+          "unit": 1,
+          "x": -5.08,
+          "y": 0.0,
+          "length": 3.81,
+          "orientation": 0.0
+        },
+        {
+          "pin_id": "2",
+          "name": "Pin_2",
+          "func": "passive",
+          "unit": 1,
+          "x": -5.08,
+          "y": -2.54,
+          "length": 3.81,
+          "orientation": 0.0
+        }
+      ]
+    },
+    "U1": {
+      "symbol": "Connector_Generic:Conn_01x05",
+      "ref": "U1",
+      "value": "Pololu S9V11MACMA #2868",
+      "footprint": "Connector_PinHeader_2.54mm:PinHeader_1x05_P2.54mm_Vertical",
+      "datasheet": "~",
+      "description": "Generic connector, single row, 01x05, script generated (kicad-library-utils/schlib/autogen/connector/)",
+      "properties": {
+        "ki_fp_filters": "Connector*:*_1x??_*"
+      },
+      "_extra_fields": {
+        "ki_fp_filters": "Connector*:*_1x??_*"
+      },
+      "pins": [
+        {
+          "pin_id": "1",
+          "name": "Pin_1",
+          "func": "passive",
+          "unit": 1,
+          "x": -5.08,
+          "y": 5.08,
+          "length": 3.81,
+          "orientation": 0.0
+        },
+        {
+          "pin_id": "2",
+          "name": "Pin_2",
+          "func": "passive",
+          "unit": 1,
+          "x": -5.08,
+          "y": 2.54,
+          "length": 3.81,
+          "orientation": 0.0
+        },
+        {
+          "pin_id": "3",
+          "name": "Pin_3",
+          "func": "passive",
+          "unit": 1,
+          "x": -5.08,
+          "y": 0.0,
+          "length": 3.81,
+          "orientation": 0.0
+        },
+        {
+          "pin_id": "4",
+          "name": "Pin_4",
+          "func": "passive",
+          "unit": 1,
+          "x": -5.08,
+          "y": -2.54,
+          "length": 3.81,
+          "orientation": 0.0
+        },
+        {
+          "pin_id": "5",
+          "name": "Pin_5",
+          "func": "passive",
+          "unit": 1,
+          "x": -5.08,
+          "y": -5.08,
+          "length": 3.81,
+          "orientation": 0.0
+        }
+      ]
+    },
+    "D1": {
+      "symbol": "Device:D_Schottky",
+      "ref": "D1",
+      "value": "1N5822",
+      "footprint": "Diode_THT:D_DO-201AD_P15.24mm_Horizontal",
+      "datasheet": "~",
+      "description": "Schottky diode",
+      "properties": {
+        "ki_fp_filters": "TO-???* *_Diode_* *SingleDiode* D_*"
+      },
+      "_extra_fields": {
+        "ki_fp_filters": "TO-???* *_Diode_* *SingleDiode* D_*"
+      },
+      "pins": [
+        {
+          "pin_id": "1",
+          "name": "K",
+          "func": "passive",
+          "unit": 1,
+          "x": -3.81,
+          "y": 0.0,
+          "length": 2.54,
+          "orientation": 0.0
+        },
+        {
+          "pin_id": "2",
+          "name": "A",
+          "func": "passive",
+          "unit": 1,
+          "x": 3.81,
+          "y": 0.0,
+          "length": 2.54,
+          "orientation": 180.0
+        }
+      ]
+    },
+    "J2": {
+      "symbol": "Connector_Generic:Conn_01x02",
+      "ref": "J2",
+      "value": "Board 5 V in (USB-C VBUS)",
+      "footprint": "Connector_PinHeader_2.54mm:PinHeader_1x02_P2.54mm_Vertical",
+      "datasheet": "~",
+      "description": "Generic connector, single row, 01x02, script generated (kicad-library-utils/schlib/autogen/connector/)",
+      "properties": {
+        "ki_fp_filters": "Connector*:*_1x??_*"
+      },
+      "_extra_fields": {
+        "ki_fp_filters": "Connector*:*_1x??_*"
+      },
+      "pins": [
+        {
+          "pin_id": "1",
+          "name": "Pin_1",
+          "func": "passive",
+          "unit": 1,
+          "x": -5.08,
+          "y": 0.0,
+          "length": 3.81,
+          "orientation": 0.0
+        },
+        {
+          "pin_id": "2",
+          "name": "Pin_2",
+          "func": "passive",
+          "unit": 1,
+          "x": -5.08,
+          "y": -2.54,
+          "length": 3.81,
+          "orientation": 0.0
+        }
+      ]
+    },
+    "U2": {
+      "symbol": "Espressif:ESP32-S3",
+      "ref": "U2",
+      "value": "ESP32-S3",
+      "footprint": "",
+      "datasheet": "https://www.espressif.com/sites/default/files/documentation/esp32-s3_datasheet_en.pdf",
+      "description": "ESP32-S3 is a low-power MCU-based system-on-chip (SoC) that supports 2.4 GHz Wi-Fi and Bluetooth\u00ae Low Energy (Bluetooth LE). It consists of high-performance dual-core microprocessor (Xtensa\u00ae 32-bit LX7), a low power coprocessor, a Wi-Fi baseband, a Bluetooth LE baseband, RF module, and peripherals.",
+      "properties": {},
+      "_extra_fields": {},
+      "pins": [
+        {
+          "pin_id": "1",
+          "name": "LNA_IN/RF",
+          "func": "bidirectional",
+          "unit": 1,
+          "x": -33.02,
+          "y": 35.56,
+          "length": 2.54,
+          "orientation": 0.0
+        },
+        {
+          "pin_id": "2",
+          "name": "VDD3P3",
+          "func": "power_in",
+          "unit": 1,
+          "x": -5.08,
+          "y": 40.64,
+          "length": 2.54,
+          "orientation": 270.0
+        },
+        {
+          "pin_id": "3",
+          "name": "VDD3P3",
+          "func": "power_in",
+          "unit": 1,
+          "x": -5.08,
+          "y": 40.64,
+          "length": 2.54,
+          "orientation": 270.0
+        },
+        {
+          "pin_id": "4",
+          "name": "CHIP_PU/RESET",
+          "func": "input",
+          "unit": 1,
+          "x": -33.02,
+          "y": 27.94,
+          "length": 2.54,
+          "orientation": 0.0
+        },
+        {
+          "pin_id": "5",
+          "name": "GPIO0/BOOT",
+          "func": "bidirectional",
+          "unit": 1,
+          "x": 33.02,
+          "y": 20.32,
+          "length": 2.54,
+          "orientation": 180.0
+        },
+        {
+          "pin_id": "6",
+          "name": "GPIO1/ADC1_CH0",
+          "func": "bidirectional",
+          "unit": 1,
+          "x": 33.02,
+          "y": 17.78,
+          "length": 2.54,
+          "orientation": 180.0
+        },
+        {
+          "pin_id": "7",
+          "name": "GPIO2/ADC1_CH1",
+          "func": "bidirectional",
+          "unit": 1,
+          "x": 33.02,
+          "y": 15.24,
+          "length": 2.54,
+          "orientation": 180.0
+        },
+        {
+          "pin_id": "8",
+          "name": "GPIO3/ADC1_CH2",
+          "func": "bidirectional",
+          "unit": 1,
+          "x": 33.02,
+          "y": 12.7,
+          "length": 2.54,
+          "orientation": 180.0
+        },
+        {
+          "pin_id": "9",
+          "name": "GPIO4/ADC1_CH3",
+          "func": "bidirectional",
+          "unit": 1,
+          "x": 33.02,
+          "y": 10.16,
+          "length": 2.54,
+          "orientation": 180.0
+        },
+        {
+          "pin_id": "10",
+          "name": "GPIO5/ADC1_CH4",
+          "func": "bidirectional",
+          "unit": 1,
+          "x": 33.02,
+          "y": 7.62,
+          "length": 2.54,
+          "orientation": 180.0
+        },
+        {
+          "pin_id": "11",
+          "name": "GPIO6/ADC1_CH5",
+          "func": "bidirectional",
+          "unit": 1,
+          "x": 33.02,
+          "y": 5.08,
+          "length": 2.54,
+          "orientation": 180.0
+        },
+        {
+          "pin_id": "12",
+          "name": "GPIO7/ADC1_CH6",
+          "func": "bidirectional",
+          "unit": 1,
+          "x": 33.02,
+          "y": 2.54,
+          "length": 2.54,
+          "orientation": 180.0
+        },
+        {
+          "pin_id": "13",
+          "name": "GPIO8/ADC1_CH7",
+          "func": "bidirectional",
+          "unit": 1,
+          "x": 33.02,
+          "y": 0.0,
+          "length": 2.54,
+          "orientation": 180.0
+        },
+        {
+          "pin_id": "14",
+          "name": "GPIO9/ADC1_CH8",
+          "func": "bidirectional",
+          "unit": 1,
+          "x": 33.02,
+          "y": -2.54,
+          "length": 2.54,
+          "orientation": 180.0
+        },
+        {
+          "pin_id": "15",
+          "name": "GPIO10/ADC1_CH9",
+          "func": "bidirectional",
+          "unit": 1,
+          "x": 33.02,
+          "y": -5.08,
+          "length": 2.54,
+          "orientation": 180.0
+        },
+        {
+          "pin_id": "16",
+          "name": "GPIO11/ADC2_CH0",
+          "func": "bidirectional",
+          "unit": 1,
+          "x": 33.02,
+          "y": -7.62,
+          "length": 2.54,
+          "orientation": 180.0
+        },
+        {
+          "pin_id": "17",
+          "name": "GPIO12/ADC2_CH1",
+          "func": "bidirectional",
+          "unit": 1,
+          "x": 33.02,
+          "y": -10.16,
+          "length": 2.54,
+          "orientation": 180.0
+        },
+        {
+          "pin_id": "18",
+          "name": "GPIO13/ADC2_CH2",
+          "func": "bidirectional",
+          "unit": 1,
+          "x": 33.02,
+          "y": -12.7,
+          "length": 2.54,
+          "orientation": 180.0
+        },
+        {
+          "pin_id": "19",
+          "name": "GPIO14/ADC2_CH3",
+          "func": "bidirectional",
+          "unit": 1,
+          "x": 33.02,
+          "y": -15.24,
+          "length": 2.54,
+          "orientation": 180.0
+        },
+        {
+          "pin_id": "20",
+          "name": "VDD3P3_RTC",
+          "func": "power_in",
+          "unit": 1,
+          "x": -2.54,
+          "y": 40.64,
+          "length": 2.54,
+          "orientation": 270.0
+        },
+        {
+          "pin_id": "21",
+          "name": "GPIO15/ADC2_CH4/XTAL_32K_P",
+          "func": "bidirectional",
+          "unit": 1,
+          "x": -33.02,
+          "y": 22.86,
+          "length": 2.54,
+          "orientation": 0.0
+        },
+        {
+          "pin_id": "22",
+          "name": "GPIO16/ADC2_CH5/XTAL_32K_N",
+          "func": "bidirectional",
+          "unit": 1,
+          "x": -33.02,
+          "y": 20.32,
+          "length": 2.54,
+          "orientation": 0.0
+        },
+        {
+          "pin_id": "23",
+          "name": "GPIO17/ADC2_CH6",
+          "func": "bidirectional",
+          "unit": 1,
+          "x": 33.02,
+          "y": -17.78,
+          "length": 2.54,
+          "orientation": 180.0
+        },
+        {
+          "pin_id": "24",
+          "name": "GPIO18/ADC2_CH7",
+          "func": "bidirectional",
+          "unit": 1,
+          "x": 33.02,
+          "y": -20.32,
+          "length": 2.54,
+          "orientation": 180.0
+        },
+        {
+          "pin_id": "25",
+          "name": "GPIO19/USB_D-/ADC2_CH8",
+          "func": "bidirectional",
+          "unit": 1,
+          "x": 33.02,
+          "y": 25.4,
+          "length": 2.54,
+          "orientation": 180.0
+        },
+        {
+          "pin_id": "26",
+          "name": "GPIO20/USB_D+/ADC2_CH9",
+          "func": "bidirectional",
+          "unit": 1,
+          "x": 33.02,
+          "y": 27.94,
+          "length": 2.54,
+          "orientation": 180.0
+        },
+        {
+          "pin_id": "27",
+          "name": "GPIO21",
+          "func": "bidirectional",
+          "unit": 1,
+          "x": 33.02,
+          "y": -22.86,
+          "length": 2.54,
+          "orientation": 180.0
+        },
+        {
+          "pin_id": "28",
+          "name": "SPI_CS1/GPIO26",
+          "func": "bidirectional",
+          "unit": 1,
+          "x": -33.02,
+          "y": -7.62,
+          "length": 2.54,
+          "orientation": 0.0
+        },
+        {
+          "pin_id": "29",
+          "name": "VDD_SPI",
+          "func": "power_out",
+          "unit": 1,
+          "x": -7.62,
+          "y": 40.64,
+          "length": 2.54,
+          "orientation": 270.0
+        },
+        {
+          "pin_id": "30",
+          "name": "SPIHD/GPIO27",
+          "func": "bidirectional",
+          "unit": 1,
+          "x": -33.02,
+          "y": -10.16,
+          "length": 2.54,
+          "orientation": 0.0
+        },
+        {
+          "pin_id": "31",
+          "name": "SPIWP/GPIO28",
+          "func": "bidirectional",
+          "unit": 1,
+          "x": -33.02,
+          "y": -12.7,
+          "length": 2.54,
+          "orientation": 0.0
+        },
+        {
+          "pin_id": "32",
+          "name": "SPICS0/GPIO29",
+          "func": "bidirectional",
+          "unit": 1,
+          "x": -33.02,
+          "y": -15.24,
+          "length": 2.54,
+          "orientation": 0.0
+        },
+        {
+          "pin_id": "33",
+          "name": "SPICLK/GPIO30",
+          "func": "bidirectional",
+          "unit": 1,
+          "x": -33.02,
+          "y": -17.78,
+          "length": 2.54,
+          "orientation": 0.0
+        },
+        {
+          "pin_id": "34",
+          "name": "SPIQ/GPIO31",
+          "func": "bidirectional",
+          "unit": 1,
+          "x": -33.02,
+          "y": -20.32,
+          "length": 2.54,
+          "orientation": 0.0
+        },
+        {
+          "pin_id": "35",
+          "name": "SPID/GPIO32",
+          "func": "bidirectional",
+          "unit": 1,
+          "x": -33.02,
+          "y": -22.86,
+          "length": 2.54,
+          "orientation": 0.0
+        },
+        {
+          "pin_id": "36",
+          "name": "SPICLK_N/GPIO48",
+          "func": "bidirectional",
+          "unit": 1,
+          "x": 33.02,
+          "y": -35.56,
+          "length": 2.54,
+          "orientation": 180.0
+        },
+        {
+          "pin_id": "37",
+          "name": "SPICLK_P/GPIO47",
+          "func": "bidirectional",
+          "unit": 1,
+          "x": 33.02,
+          "y": -33.02,
+          "length": 2.54,
+          "orientation": 180.0
+        },
+        {
+          "pin_id": "38",
+          "name": "GPIO33",
+          "func": "bidirectional",
+          "unit": 1,
+          "x": -33.02,
+          "y": -25.4,
+          "length": 2.54,
+          "orientation": 0.0
+        },
+        {
+          "pin_id": "39",
+          "name": "GPIO34",
+          "func": "bidirectional",
+          "unit": 1,
+          "x": -33.02,
+          "y": -27.94,
+          "length": 2.54,
+          "orientation": 0.0
+        },
+        {
+          "pin_id": "40",
+          "name": "GPIO35",
+          "func": "bidirectional",
+          "unit": 1,
+          "x": -33.02,
+          "y": -30.48,
+          "length": 2.54,
+          "orientation": 0.0
+        },
+        {
+          "pin_id": "41",
+          "name": "GPIO36",
+          "func": "bidirectional",
+          "unit": 1,
+          "x": -33.02,
+          "y": -33.02,
+          "length": 2.54,
+          "orientation": 0.0
+        },
+        {
+          "pin_id": "42",
+          "name": "GPIO37",
+          "func": "bidirectional",
+          "unit": 1,
+          "x": -33.02,
+          "y": -35.56,
+          "length": 2.54,
+          "orientation": 0.0
+        },
+        {
+          "pin_id": "43",
+          "name": "GPIO38",
+          "func": "bidirectional",
+          "unit": 1,
+          "x": 33.02,
+          "y": -25.4,
+          "length": 2.54,
+          "orientation": 180.0
+        },
+        {
+          "pin_id": "44",
+          "name": "MTCK/JTAG/GPIO39",
+          "func": "bidirectional",
+          "unit": 1,
+          "x": -33.02,
+          "y": 5.08,
+          "length": 2.54,
+          "orientation": 0.0
+        },
+        {
+          "pin_id": "45",
+          "name": "MTDO/JTAG/GPIO40",
+          "func": "bidirectional",
+          "unit": 1,
+          "x": -33.02,
+          "y": 2.54,
+          "length": 2.54,
+          "orientation": 0.0
+        },
+        {
+          "pin_id": "46",
+          "name": "VDD3P3_CPU",
+          "func": "power_in",
+          "unit": 1,
+          "x": 0.0,
+          "y": 40.64,
+          "length": 2.54,
+          "orientation": 270.0
+        },
+        {
+          "pin_id": "47",
+          "name": "MTDI/JTAG/GPIO41",
+          "func": "bidirectional",
+          "unit": 1,
+          "x": -33.02,
+          "y": 0.0,
+          "length": 2.54,
+          "orientation": 0.0
+        },
+        {
+          "pin_id": "48",
+          "name": "MTMS/JTAG/GPIO42",
+          "func": "bidirectional",
+          "unit": 1,
+          "x": -33.02,
+          "y": -2.54,
+          "length": 2.54,
+          "orientation": 0.0
+        },
+        {
+          "pin_id": "49",
+          "name": "U0TXD/PROG/GPIO43",
+          "func": "bidirectional",
+          "unit": 1,
+          "x": 33.02,
+          "y": 35.56,
+          "length": 2.54,
+          "orientation": 180.0
+        },
+        {
+          "pin_id": "50",
+          "name": "U0RXD/PROG/GPIO44",
+          "func": "bidirectional",
+          "unit": 1,
+          "x": 33.02,
+          "y": 33.02,
+          "length": 2.54,
+          "orientation": 180.0
+        },
+        {
+          "pin_id": "51",
+          "name": "GPIO45",
+          "func": "bidirectional",
+          "unit": 1,
+          "x": 33.02,
+          "y": -27.94,
+          "length": 2.54,
+          "orientation": 180.0
+        },
+        {
+          "pin_id": "52",
+          "name": "GPIO46",
+          "func": "bidirectional",
+          "unit": 1,
+          "x": 33.02,
+          "y": -30.48,
+          "length": 2.54,
+          "orientation": 180.0
+        },
+        {
+          "pin_id": "53",
+          "name": "XTAL_N",
+          "func": "input",
+          "unit": 1,
+          "x": -33.02,
+          "y": 15.24,
+          "length": 2.54,
+          "orientation": 0.0
+        },
+        {
+          "pin_id": "54",
+          "name": "XTAL_P",
+          "func": "output",
+          "unit": 1,
+          "x": -33.02,
+          "y": 12.7,
+          "length": 2.54,
+          "orientation": 0.0
+        },
+        {
+          "pin_id": "55",
+          "name": "VDDA",
+          "func": "power_in",
+          "unit": 1,
+          "x": 2.54,
+          "y": 40.64,
+          "length": 2.54,
+          "orientation": 270.0
+        },
+        {
+          "pin_id": "56",
+          "name": "VDDA",
+          "func": "passive",
+          "unit": 1,
+          "x": 2.54,
+          "y": 40.64,
+          "length": 2.54,
+          "orientation": 270.0
+        },
+        {
+          "pin_id": "57",
+          "name": "GND",
+          "func": "power_in",
+          "unit": 1,
+          "x": 0.0,
+          "y": -40.64,
+          "length": 2.54,
+          "orientation": 90.0
+        }
+      ]
+    },
+    "SW2": {
+      "symbol": "Switch:SW_Push",
+      "ref": "SW2",
+      "value": "SW2",
+      "footprint": "Button_Switch_SMD:SW_SPST_PTS645",
+      "datasheet": "~",
+      "description": "Push button switch, generic, two pins",
+      "properties": {},
+      "_extra_fields": {},
+      "pins": [
+        {
+          "pin_id": "1",
+          "name": "1",
+          "func": "passive",
+          "unit": 1,
+          "x": -5.08,
+          "y": 0.0,
+          "length": 2.54,
+          "orientation": 0.0
+        },
+        {
+          "pin_id": "2",
+          "name": "2",
+          "func": "passive",
+          "unit": 1,
+          "x": 5.08,
+          "y": 0.0,
+          "length": 2.54,
+          "orientation": 180.0
+        }
+      ]
+    },
+    "U3": {
+      "symbol": "Connector_Generic:Conn_01x03",
+      "ref": "U3",
+      "value": "0-25 V divider module",
+      "footprint": "Connector_PinHeader_2.54mm:PinHeader_1x03_P2.54mm_Vertical",
+      "datasheet": "~",
+      "description": "Generic connector, single row, 01x03, script generated (kicad-library-utils/schlib/autogen/connector/)",
+      "properties": {
+        "ki_fp_filters": "Connector*:*_1x??_*"
+      },
+      "_extra_fields": {
+        "ki_fp_filters": "Connector*:*_1x??_*"
+      },
+      "pins": [
+        {
+          "pin_id": "1",
+          "name": "Pin_1",
+          "func": "passive",
+          "unit": 1,
+          "x": -5.08,
+          "y": 2.54,
+          "length": 3.81,
+          "orientation": 0.0
+        },
+        {
+          "pin_id": "2",
+          "name": "Pin_2",
+          "func": "passive",
+          "unit": 1,
+          "x": -5.08,
+          "y": 0.0,
+          "length": 3.81,
+          "orientation": 0.0
+        },
+        {
+          "pin_id": "3",
+          "name": "Pin_3",
+          "func": "passive",
+          "unit": 1,
+          "x": -5.08,
+          "y": -2.54,
+          "length": 3.81,
+          "orientation": 0.0
+        }
+      ]
+    }
+  },
+  "nets": {
+    "BAT_POS_SWITCHED": {
+      "nodes": [
+        {
+          "component": "J1",
+          "pin": {
+            "number": "1",
+            "name": "Pin_1",
+            "type": "passive"
+          }
+        },
+        {
+          "component": "U1",
+          "pin": {
+            "number": "3",
+            "name": "Pin_3",
+            "type": "passive"
+          }
+        },
+        {
+          "component": "U3",
+          "pin": {
+            "number": "1",
+            "name": "Pin_1",
+            "type": "passive"
+          }
+        }
+      ],
+      "is_power": false,
+      "power_symbol": null,
+      "trace_current": null,
+      "impedance": null,
+      "properties": {}
+    },
+    "GND": {
+      "nodes": [
+        {
+          "component": "J1",
+          "pin": {
+            "number": "2",
+            "name": "Pin_2",
+            "type": "passive"
+          }
+        },
+        {
+          "component": "U1",
+          "pin": {
+            "number": "2",
+            "name": "Pin_2",
+            "type": "passive"
+          }
+        },
+        {
+          "component": "J2",
+          "pin": {
+            "number": "2",
+            "name": "Pin_2",
+            "type": "passive"
+          }
+        },
+        {
+          "component": "U2",
+          "pin": {
+            "number": "57",
+            "name": "GND",
+            "type": "power_in"
+          }
+        },
+        {
+          "component": "U3",
+          "pin": {
+            "number": "3",
+            "name": "Pin_3",
+            "type": "passive"
+          }
+        }
+      ],
+      "is_power": true,
+      "power_symbol": "power:GND",
+      "trace_current": null,
+      "impedance": null,
+      "properties": {}
+    },
+    "REG_5V": {
+      "nodes": [
+        {
+          "component": "U1",
+          "pin": {
+            "number": "1",
+            "name": "Pin_1",
+            "type": "passive"
+          }
+        },
+        {
+          "component": "D1",
+          "pin": {
+            "number": "2",
+            "name": "A",
+            "type": "passive"
+          }
+        }
+      ],
+      "is_power": false,
+      "power_symbol": null,
+      "trace_current": null,
+      "impedance": null,
+      "properties": {}
+    },
+    "CTRL_5V": {
+      "nodes": [
+        {
+          "component": "D1",
+          "pin": {
+            "number": "1",
+            "name": "K",
+            "type": "passive"
+          }
+        },
+        {
+          "component": "J2",
+          "pin": {
+            "number": "1",
+            "name": "Pin_1",
+            "type": "passive"
+          }
+        }
+      ],
+      "is_power": false,
+      "power_symbol": null,
+      "trace_current": null,
+      "impedance": null,
+      "properties": {}
+    },
+    "VBAT_SENSE": {
+      "nodes": [
+        {
+          "component": "U2",
+          "pin": {
+            "number": "9",
+            "name": "GPIO4/ADC1_CH3",
+            "type": "bidirectional"
+          }
+        },
+        {
+          "component": "U3",
+          "pin": {
+            "number": "2",
+            "name": "Pin_2",
+            "type": "passive"
+          }
+        }
+      ],
+      "is_power": false,
+      "power_symbol": null,
+      "trace_current": null,
+      "impedance": null,
+      "properties": {}
+    },
+    "WAKE": {
+      "nodes": [
+        {
+          "component": "U2",
+          "pin": {
+            "number": "17",
+            "name": "GPIO12/ADC2_CH1",
+            "type": "bidirectional"
+          }
+        },
+        {
+          "component": "SW2",
+          "pin": {
+            "number": "1",
+            "name": "1",
+            "type": "passive"
+          }
+        }
+      ],
+      "is_power": false,
+      "power_symbol": null,
+      "trace_current": null,
+      "impedance": null,
+      "properties": {}
+    },
+    "BOARD_3V3": {
+      "nodes": [
+        {
+          "component": "SW2",
+          "pin": {
+            "number": "2",
+            "name": "2",
+            "type": "passive"
+          }
+        }
+      ],
+      "is_power": false,
+      "power_symbol": null,
+      "trace_current": null,
+      "impedance": null,
+      "properties": {}
+    }
+  },
+  "subcircuits": [],
+  "annotations": []
+}
