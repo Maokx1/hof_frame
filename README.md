@@ -9,7 +9,7 @@ Hall of Fame frame with E-ink display
 ## Wiring source of truth
 
 The wiring is being captured as code with [circuit-synth](https://www.circuit-synth.com/)
-in [`docs/wiring.py`](docs/wiring.py). It records the proposed electrical
+in [`docs/wiring_model/`](docs/wiring_model). It records the proposed electrical
 connections; [`docs/WIRING.md`](docs/WIRING.md) keeps the connection schedule,
 prose, bill of materials and bring-up procedure.
 
@@ -30,7 +30,7 @@ cd ../..
 Then print the net list:
 
 ```sh
-KICAD_SYMBOL_DIR=.kicad/symbols uv run python docs/wiring.py
+KICAD_SYMBOL_DIR=.kicad/symbols uv run wiring
 ```
 
 To generate the KiCad schematic project in `docs/kicad/hof_frame` (open the
@@ -38,8 +38,8 @@ To generate the KiCad schematic project in `docs/kicad/hof_frame` (open the
 configured there):
 
 ```sh
-KICAD_SYMBOL_DIR=.kicad/symbols uv run python docs/wiring.py --kicad
+KICAD_SYMBOL_DIR=.kicad/symbols uv run wiring --kicad
 ```
 
 `--kicad DIR` writes to `DIR/hof_frame` instead. The output is regenerated from
-`wiring.py` and overwrites manual edits.
+`wiring_model` and overwrites manual edits.

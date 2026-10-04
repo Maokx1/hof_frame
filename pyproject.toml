@@ -2,7 +2,22 @@
 name = "hof-frame"
 version = "0.1.0"
 requires-python = ">=3.14"
-dependencies = ["circuit-synth>=0.12.1", "reportlab>=5.0.1"]
+dependencies = [
+    "circuit-synth>=0.12.1",
+    "pydantic>=2.13.5",
+    "reportlab>=5.0.1",
+]
+
+[project.scripts]
+wiring = "wiring_model.__main__:main"
+
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["docs"]
+include = ["wiring_model*"]
 
 [dependency-groups]
 dev = ["ruff>=0.16.10"]

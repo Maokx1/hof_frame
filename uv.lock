@@ -808,9 +808,10 @@ wheels = [
 [[package]]
 name = "hof-frame"
 version = "0.1.0"
-source = { virtual = "." }
+source = { editable = "." }
 dependencies = [
     { name = "circuit-synth" },
+    { name = "pydantic" },
     { name = "reportlab" },
 ]
 
@@ -822,6 +823,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "circuit-synth", specifier = ">=0.12.1" },
+    { name = "pydantic", specifier = ">=2.13.5" },
     { name = "reportlab", specifier = ">=5.0.1" },
 ]
 

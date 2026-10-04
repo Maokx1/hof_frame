@@ -7,14 +7,14 @@ power the controller until the converter output has been measured.
 
 ## Executable wiring model
 
-The generated KiCad schematic and netlist come from [`wiring.py`](wiring.py).
+The generated KiCad schematic and netlist come from [`wiring_model`](wiring_model).
 Use that script as the source for the modeled connections; this document
 explains the design, assumptions, and bring-up requirements. To regenerate the
 schematic, follow the setup instructions in the repository
 [README](../README.md) and run:
 
 ```sh
-KICAD_SYMBOL_DIR=.kicad/symbols uv run python docs/wiring.py --kicad
+KICAD_SYMBOL_DIR=.kicad/symbols uv run wiring --kicad
 ```
 
 For the proof of concept, use an off-the-shelf passive DC voltage-sensor
@@ -102,7 +102,7 @@ next refresh restores the picture.
 | S9V11MACMA GND | ESP32-133C02 GND | Common return | Required |
 | Holder BAT+ after switch | Voltage-sensor module VIN/+ | Battery measurement source | Battery side, before the converter |
 | Holder BAT− | Voltage-sensor module GND/− | Measurement return | Common system ground |
-| Voltage-sensor module VOUT/S | GPIO4 / ADC1_CH3 | Pack-voltage sense | Modeled in [`wiring.py`](wiring.py); the datasheet does not assign GPIO4 to the display, SD card or buttons, but confirm it is broken out, plus output range and ratio |
+| Voltage-sensor module VOUT/S | GPIO4 / ADC1_CH3 | Pack-voltage sense | Modeled in [`wiring_model`](wiring_model); the datasheet does not assign GPIO4 to the display, SD card or buttons, but confirm it is broken out, plus output range and ratio |
 | SW2 | GPIO12 | Wake input, active-high per Good Display; RTC-capable | Needs the board revision with SW2–SW4 fitted; confirm on the schematic whether an external pull-down exists, else use the internal pull-down |
 | ESP32-133C02 display connector | GDEP133C02 | Supplied display cable | Do not substitute a cable or assume pin order |
 
