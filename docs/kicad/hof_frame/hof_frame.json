@@ -1,7 +1,7 @@
 {
   "name": "hof_frame",
   "description": "Battery -> S9V11MACMA -> 1N5822 -> ESP32-133C02, plus pack-voltage sense.",
-  "tstamps": "/hof_frame-129636824561856/",
+  "tstamps": "/hof_frame-124732508804096/",
   "source_file": "hof_frame.kicad_sch",
   "components": {
     "J1": {
