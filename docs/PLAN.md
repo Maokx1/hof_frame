@@ -105,7 +105,7 @@ Define a conservative low-battery cutoff for the pack. Measure the minimum loade
 
 ### Battery-voltage measurement and cutoff circuit
 
-Measure the pack on the switched-holder side of the power path, before the converter. Use a high-impedance divider to a confirmed spare ESP32-S3 ADC input:
+Measure the pack on the switched-holder side of the power path, before the converter. Use a high-impedance divider to the proposed GPIO4 / ADC1_CH3 input after confirming that it is accessible on the board:
 
 ```text
 Battery+ after holder switch ── 100 kΩ ──┬── ADC input
@@ -268,7 +268,7 @@ Still to be decided: the AP SSID and password handling, the transfer-inactivity 
 
 ## Firmware milestones
 
-1. Confirm the ESP32-S3-WROOM-1 configuration, board GPIO map (including a spare ADC input), display bus, SW2/GPIO12 (active-high) wake behavior, PSRAM, flash layout, and Wi-Fi AP support.
+1. Confirm the ESP32-S3-WROOM-1 configuration, board GPIO map (including whether proposed battery-sense pin GPIO4 / ADC1_CH3 is broken out, or identify an alternative ADC input), display bus, SW2/GPIO12 (active-high) wake behavior, PSRAM, flash layout, and Wi-Fi AP support.
 2. Create a minimal ESP-IDF-backed Rust project that builds, can be flashed during development, logs the wake cause, and enters/exits deep sleep. Measure the whole board's deep-sleep current at its 5 V input as early as possible, since it dominates the battery budget.
 3. Bring up the display with a simple test pattern and validate the refresh sequence.
 4. Implement SW2 and 24-hour RTC wake handling, including the low-battery behavior for scheduled refreshes.
