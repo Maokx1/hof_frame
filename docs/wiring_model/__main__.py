@@ -18,6 +18,11 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import cast
 
+from circuit_synth import Circuit
+
+from wiring_model.circuit import hof_frame_wiring
+from wiring_model.kicad import write_kicad_schematic
+
 REQUIRED_SYMBOL_LIBRARIES = (
     "Connector_Generic",
     "Device",
@@ -58,11 +63,6 @@ def main() -> None:
 
     # write_kicad_schematic() changes directory, so a relative path would break
     os.environ["KICAD_SYMBOL_DIR"] = symbol_dir
-
-    from circuit_synth import Circuit
-
-    from wiring_model.circuit import hof_frame_wiring
-    from wiring_model.kicad import write_kicad_schematic
 
     # circuit-synth's decorator is callable at runtime, but its type hints say Circuit.
     build_circuit = cast(Callable[[], Circuit], hof_frame_wiring)
