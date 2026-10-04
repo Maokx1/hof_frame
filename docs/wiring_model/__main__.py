@@ -8,8 +8,8 @@ Needs the KiCad symbol libraries (Connector_Generic, Device, power, Switch) and
 Espressif.kicad_sym from espressif/kicad-libraries; run
 from the repository root:
 
-    KICAD_SYMBOL_DIR=.kicad/symbols uv run python -m wiring_model         # net list
-    KICAD_SYMBOL_DIR=.kicad/symbols uv run python -m wiring_model --kicad # docs/kicad/hof_frame
+    KICAD_SYMBOL_DIR=.kicad/symbols uv run wiring        # net list
+    KICAD_SYMBOL_DIR=.kicad/symbols uv run wiring --kicad # docs/kicad/hof_frame
 """
 
 import argparse
