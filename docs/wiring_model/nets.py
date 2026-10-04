@@ -74,8 +74,9 @@ class Net(Enum):
         name="VBAT_SENSE",
         pins=((Part.ESP32_S3_SOC, 9), (Part.VOLTAGE_SENSOR, 2)),
         notes=(
-            "Divider output to GPIO4 (ADC1_CH3), which the datasheet does not "
-            "assign to the display, SD card or buttons; confirm it is broken out."
+            "Proposed divider output to GPIO4 (ADC1_CH3), which the datasheet does "
+            "not assign to the display, SD card or buttons; confirm it is broken "
+            "out before wiring."
         ),
     )
     WAKE = NetSpec(

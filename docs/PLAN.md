@@ -10,7 +10,7 @@ Build a Hall of Fame frame around a 13.3-inch GDEP133C02 Spectra 6 color e-ink d
 - Controller: Good Display ESP32-133C02 with ESP32-S3-WROOM-1.
 - Memory: 16 MB flash and 8 MB octal PSRAM, corroborated by third-party research of Good Display's firmware (not yet measured on this board); confirm usable configuration during bring-up.
 - Wake button: SW2 on GPIO12, documented by Good Display as **active-high** (reads high when pressed). GPIO12 is an RTC-capable pin on the ESP32-S3, so it can wake from deep sleep. SW2–SW4 exist only on the board revision with the three onboard buttons; confirm the received board has them, and check against the schematic whether an external pull-down is fitted (otherwise use the internal pull-down).
-- Spare ADC input for battery sensing: **not yet identified**. The board's documented pin table uses nearly every exposed GPIO (display, microSD, buttons, UART, USB). The ESP32-S3 ADC1 pins GPIO1, GPIO4 and GPIO10 are not in that table, but whether any is broken out must be checked on the schematic/headers before the divider is wired. This is not a blocker for ordering. If no pin is accessible, a fallback is to desolder an unused onboard part (for example the SW3 or SW4 button on GPIO13/GPIO14) and use that pad. Those are ADC2 pins, which are unreliable while Wi-Fi is running, so sample the battery before starting Wi-Fi (as the plan already requires).
+- Battery-sense ADC: **GPIO4 / ADC1_CH3 is the proposed pin in the wiring model, but is not yet confirmed to be broken out on the received board**. The board's documented pin table uses nearly every exposed GPIO (display, microSD, buttons, UART, USB), and GPIO4 is not in that table; verify it against the board schematic or headers before wiring the divider. If GPIO4 is inaccessible, identify another spare ADC1 pin or consider desoldering an unused onboard part (for example the SW3 or SW4 button on GPIO13/GPIO14). Those are ADC2 pins, which are unreliable while Wi-Fi is running, so sample the battery before starting Wi-Fi (as the plan already requires).
 - Battery: four matched Green Cell AAA (R03) 950 mAh NiMH cells in a series holder. The series pack is 950 mAh at approximately 4.8 V nominal (4.56 Wh nominal).
 - Battery holder: [Allegro 4×AAA holder with integrated switch](https://allegro.pl/produkt/koszyk-na-4-baterie-aaa-4xaaa-z-wlacznikiem-czarny-4c5bce7c-e839-49d4-b6d2-8abc42cdc347?offerId=17382812988).
 - Reverse-polarity protection: none. The battery holder fixes the cell polarity, so a protector module was dropped to keep the first build simple and to save its quiescent current and voltage drop.
@@ -105,7 +105,7 @@ Define a conservative low-battery cutoff for the pack. Measure the minimum loade
 
 ### Battery-voltage measurement and cutoff circuit
 
-Measure the pack on the switched-holder side of the power path, before the converter. Use a high-impedance divider to a confirmed spare ESP32-S3 ADC input:
+Measure the pack on the switched-holder side of the power path, before the converter. Use a high-impedance divider to the proposed GPIO4 / ADC1_CH3 input after confirming that it is accessible on the board:
 
 ```text
 Battery+ after holder switch ── 100 kΩ ──┬── ADC input
@@ -268,7 +268,7 @@ Still to be decided: the AP SSID and password handling, the transfer-inactivity 
 
 ## Firmware milestones
 
-1. Confirm the ESP32-S3-WROOM-1 configuration, board GPIO map (including a spare ADC input), display bus, SW2/GPIO12 (active-high) wake behavior, PSRAM, flash layout, and Wi-Fi AP support.
+1. Confirm the ESP32-S3-WROOM-1 configuration, board GPIO map (including whether proposed battery-sense pin GPIO4 / ADC1_CH3 is broken out, or identify an alternative ADC input), display bus, SW2/GPIO12 (active-high) wake behavior, PSRAM, flash layout, and Wi-Fi AP support.
 2. Create a minimal ESP-IDF-backed Rust project that builds, can be flashed during development, logs the wake cause, and enters/exits deep sleep. Measure the whole board's deep-sleep current at its 5 V input as early as possible, since it dominates the battery budget.
 3. Bring up the display with a simple test pattern and validate the refresh sequence.
 4. Implement SW2 and 24-hour RTC wake handling, including the low-battery behavior for scheduled refreshes.

@@ -107,7 +107,10 @@ class Part(Enum):
         position=(210.82, 96.52),  # inside the board outline
         # Library pin coordinates have y up; offsets here have y down.
         pin_offsets={9: (33.02, -10.16), 17: (33.02, 10.16)},
-        notes="Only the wired pins are modelled; supply pins stay open.",
+        notes=(
+            "GPIO4/ADC1_CH3 is the proposed battery-sense pin, not confirmed "
+            "broken out; only wired pins are modelled and supply pins stay open."
+        ),
     )
     WAKE_BUTTON = PartSpec(
         ref="SW2",

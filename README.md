@@ -14,13 +14,15 @@ connections; [`docs/WIRING.md`](docs/WIRING.md) keeps the connection schedule,
 prose, bill of materials and bring-up procedure.
 
 The Python environment is managed with [uv](https://docs.astral.sh/uv/).
-circuit-synth needs KiCad symbol libraries (`Connector_Generic`, `Device`,
-`power`) plus Espressif's `Espressif` library for the ESP32-S3 symbol. Without a KiCad install, download them into the git-ignored
-`.kicad/symbols` directory:
+The wiring model requires the KiCad symbol libraries `Connector_Generic`,
+`Device`, and `Switch`, plus Espressif's `Espressif` library for the ESP32-S3
+symbol. Without a KiCad install, download them into the git-ignored
+`.kicad/symbols` directory. The wiring command checks these files before
+building and reports any missing libraries:
 
 ```sh
 mkdir -p .kicad/symbols && cd .kicad/symbols
-for l in Connector_Generic Device power; do
+for l in Connector_Generic Device Switch; do
   curl -fsSLO "https://gitlab.com/kicad/libraries/kicad-symbols/-/raw/9.0.0/$l.kicad_sym"
 done
 curl -fsSLO "https://raw.githubusercontent.com/espressif/kicad-libraries/main/symbols/Espressif.kicad_sym"

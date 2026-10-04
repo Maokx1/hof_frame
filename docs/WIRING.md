@@ -25,7 +25,7 @@ is a representative example:
 ```text
 BAT+ after holder switch ── module VIN / +
 BAT− / system GND ───────── module GND / −
-module VOUT / S ──────────── GPIO4 / ADC1_CH3 (modeled; verify it is broken out)
+module VOUT / S ──────────── GPIO4 / ADC1_CH3 (proposed; verify it is broken out)
 ```
 
 These modules are normally only resistor dividers; they need no supply
@@ -102,7 +102,7 @@ next refresh restores the picture.
 | S9V11MACMA GND | ESP32-133C02 GND | Common return | Required |
 | Holder BAT+ after switch | Voltage-sensor module VIN/+ | Battery measurement source | Battery side, before the converter |
 | Holder BAT− | Voltage-sensor module GND/− | Measurement return | Common system ground |
-| Voltage-sensor module VOUT/S | GPIO4 / ADC1_CH3 | Pack-voltage sense | Modeled in [`wiring_model`](wiring_model); the datasheet does not assign GPIO4 to the display, SD card or buttons, but confirm it is broken out, plus output range and ratio |
+| Voltage-sensor module VOUT/S | GPIO4 / ADC1_CH3 | Pack-voltage sense | Proposed in [`wiring_model`](wiring_model), not confirmed broken out; check the board schematic or headers, plus the module output range and ratio, before wiring |
 | SW2 | GPIO12 | Wake input, active-high per Good Display; RTC-capable | Needs the board revision with SW2–SW4 fitted; confirm on the schematic whether an external pull-down exists, else use the internal pull-down |
 | ESP32-133C02 display connector | GDEP133C02 | Supplied display cable | Do not substitute a cable or assume pin order |
 
