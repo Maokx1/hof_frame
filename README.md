@@ -8,17 +8,15 @@ Hall of Fame frame with E-ink display
 
 ## Wiring source of truth
 
-The wiring is being captured as code with [circuit-synth](https://www.circuit-synth.com/)
-in [`docs/wiring_model/`](docs/wiring_model). It records the proposed electrical
-connections; [`docs/WIRING.md`](docs/WIRING.md) keeps the connection schedule,
-prose, bill of materials and bring-up procedure.
+The proposed electrical connections are modeled in code with
+[circuit-synth](https://www.circuit-synth.com/) in
+[`docs/wiring_model/`](docs/wiring_model). [`docs/WIRING.md`](docs/WIRING.md)
+provides the connection schedule, bill of materials, and bring-up instructions.
 
-The Python environment is managed with [uv](https://docs.astral.sh/uv/).
-The wiring model requires the KiCad symbol libraries `Connector_Generic`,
-`Device`, and `Switch`, plus Espressif's `Espressif` library for the ESP32-S3
-symbol. Without a KiCad install, download them into the git-ignored
-`.kicad/symbols` directory. The wiring command checks these files before
-building and reports any missing libraries:
+The Python environment uses [uv](https://docs.astral.sh/uv/). circuit-synth
+requires KiCad's `Connector_Generic`, `Device`, and `Switch` symbol libraries,
+plus Espressif's `Espressif` library for the ESP32-S3. If KiCad isn't installed,
+download these libraries to the git-ignored `.kicad/symbols` directory:
 
 ```sh
 mkdir -p .kicad/symbols && cd .kicad/symbols
