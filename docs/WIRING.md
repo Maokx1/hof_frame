@@ -148,6 +148,39 @@ To set the cutoff:
    with VIN = 5.4 V and a 4.4 V target, EN should be about 0.86 V.
 3. Verify by running real cells down under load (or with a bench supply, if one is available) until the output switches off.
 
+### Measurement procedure and recorded calibration
+
+Both trimmers are 11-turn potentiometers. The 0.7 V (sleep) and 0.8 V
+(re-enable) EN thresholds come from the Pololu
+[S9V11MACMA product page](https://www.pololu.com/product/2868). EN is a fixed
+fraction of VIN set by the cutoff trimmer, so set it once; it does not need
+readjusting as the pack discharges.
+
+Multimeter on DC volts, black probe on the regulator GND pin, battery
+connected and switched on, controller and OUT load disconnected. Pins read
+from the pin row labelled SEL, PG, EN, IN, GND, OUT:
+
+1. Output: red probe on OUT; turn the output trimmer until it reads 5.0 V.
+2. Input: red probe on IN to read VIN.
+3. Cutoff: calculate `EN_target = 0.7 V × VIN / VIN_cutoff`, then turn the
+   cutoff trimmer until EN reads that value. Measure VIN and EN together.
+4. Check: `EN / VIN` should stay constant; `VIN_cutoff = 0.7 V × VIN / EN`.
+
+Recorded values (this unit):
+
+| Item | Value |
+|---|---|
+| Output (OUT to GND) | 5.005 V |
+| VIN at calibration | 5.103 V |
+| Target cutoff | 4.4 V (EN target 0.812 V) |
+| EN set (trimmer is hard to set precisely) | 0.816 V |
+| Resulting EN / VIN | 0.1599 |
+| Resulting cutoff (EN = 0.7 V) | ≈ 4.38 V |
+| Resulting restart (EN = 0.8 V) | ≈ 5.00 V |
+
+The result is within 0.02 V of the 4.4 V target. Still verify it with real
+cells or a bench supply as described above.
+
 Start with about 4.4 V for the four-cell pack (1.1 V/cell); this is a test
 value, not a Green Cell specification. Choose the final threshold above the
 cell discharge limit and above the minimum voltage at which the
