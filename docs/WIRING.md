@@ -169,7 +169,7 @@ from the pin row labelled SEL, PG, EN, IN, GND, OUT:
 Recorded values (this unit):
 
 | Item | Value |
-|---|---|
+| --- | --- |
 | Output (OUT to GND) | 5.005 V |
 | VIN at calibration | 5.103 V |
 | Target cutoff | 4.4 V (EN target 0.812 V) |
