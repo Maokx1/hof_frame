@@ -171,11 +171,11 @@ Because the converter's cutoff is not latching, a pack that recovers after shutd
 
 - Set the latch when the firmware measures a pack voltage below the low-battery threshold, sees a brownout reset, or finds that the previous cycle did not finish cleanly. Detect the last case with a "work in progress" flag set before a transfer, flash write or refresh and cleared just before entering deep sleep.
 - Check the pack voltage on every power-on reset, since cell swaps and converter restarts both look like a power-on. If the voltage is below a recovery threshold, set the latch and sleep.
-- While latched, do no Wi-Fi, flash writes or refresh, and re-enter deep sleep immediately. The 24-hour timer wake still happens, but only re-checks and sleeps again.
-- Clear it only when **the user acknowledges it** by pressing SW2, and only if the pack voltage is above a recovery threshold higher than the low-battery threshold (hysteresis). Freshly charged or replaced cells (about 5.2–5.8 V) pass easily; recovered tired cells (about 4.8–4.9 V) do not.
+- While latched, do no Wi-Fi, image flash writes or refresh, and return to deep sleep after safe button-release handling. Only necessary latch metadata changes may be written; do not rewrite unchanged metadata on every wake. The 24-hour timer wake still happens, but only re-checks and sleeps again.
+- Clear it only when **the user acknowledges it** with a qualified five-second SW7/GPIO13 hold, and only if the pack voltage is above a recovery threshold higher than the low-battery threshold (hysteresis). Freshly charged or replaced cells (about 5.2–5.8 V) pass easily; recovered tired cells (about 4.8–4.9 V) do not.
 - Pick both thresholds from the loaded-voltage characterization and real discharged cells, and verify on the bench that the converter does not cycle.
 
-While latched, a button press with a recovered-but-still-low pack must not clear it, so the frame needs some way to tell the user why it did nothing. A low-battery message on the panel before it goes dark is an option, but it costs a refresh at the worst moment; decide this during bring-up.
+While latched, a button press with a recovered-but-still-low pack must not clear it, so the frame needs some way to tell the user why it did nothing. **Decision:** when the latch first sets, refresh once with a "Replace batteries" screen, only if the measured voltage still has margin for that refresh above the converter cutoff; otherwise keep the current picture. See [low-battery screen](../firmware/STATE_MACHINE.md#low-battery-screen).
 
 ## Physical frame
 
@@ -193,6 +193,11 @@ Target the ESP32-S3-WROOM-1 using an ESP-IDF-backed Rust project (`esp-idf-svc`)
 
 Image upload uses a **Wi-Fi access point and an embedded web page**, not Bluetooth (see "Image transfer" and "Future: Bluetooth").
 
+The detailed [firmware state-machine specification](../firmware/STATE_MACHINE.md)
+defines state contracts, upload/commit sequencing, safety recovery, required
+components, acceptance checks, and open decisions. The diagram below is a
+target overview, not the current bring-up implementation.
+
 ```mermaid
 flowchart TD
     A["Deep sleep"]
@@ -206,15 +211,19 @@ flowchart TD
     J["24-hour RTC wake"]
     K["Refresh persisted frame<br/>Wi-Fi disabled"]
     L{"Low-battery latch set<br/>or voltage too low?"}
+    L2{"Latch set or<br/>voltage too low?"}
 
-    A -->|"SW2 / GPIO12"| L
+    A -->|"SW7 / GPIO13"| Q{"SW7 gesture?"}
+    Q -->|"Other"| E
+    Q -->|"Five-second hold"| L
+    Q -->|"Triple press"| L2
     L -->|Yes| E
     L -->|No| B --> D
     D -->|No| E
     D -->|Yes| F --> G
     G -->|Yes| H --> E
     G -->|No or interrupted| I --> E
-    A -->|Timer| J --> L2{"Latch set or<br/>voltage too low?"}
+    A -->|Timer| J --> L2
     L2 -->|Yes| E
     L2 -->|No| K --> E
 ```
@@ -222,25 +231,32 @@ flowchart TD
 Required behavior:
 
 1. Wake from deep sleep using SW7/GPIO13 or the 24-hour RTC timer and identify the wake cause.
-2. On a button wake, start a Wi-Fi access point (WPA2, password printed on the frame) and an HTTP server that serves a single upload page at `http://192.168.4.1`.
+2. On a button wake, qualify a five-second SW7/GPIO13 hold before starting a Wi-Fi access point (SSID `HOF-Frame`, WPA2, password fixed at build time, kept out of git, and printed on the frame) and an HTTP server that serves a single upload page at `http://192.168.4.1`. Shorter presses return to sleep without starting Wi-Fi.
 3. Start a five-minute idle timer when the access point comes up, then shorten it after measuring real transfers.
 4. Cancel the idle timer when an upload request starts and apply the transfer deadline instead.
 5. Receive and validate a complete image. After a successful upload reply `200 OK` ("received") and stop Wi-Fi *before* the slow decode and refresh.
-6. Decode, resize or crop to exactly 1600×1200, apply the required Spectra 6 color conversion and dithering, persist a display-ready frame, and render only a complete, decodable, integrity-checked image.
-7. On an RTC wake, refresh the persisted frame with Wi-Fi disabled, then return to deep sleep.
-8. Below the measured low-battery threshold, or while the low-battery latch is set, do not start Wi-Fi or a display refresh; the converter's built-in cutoff disables its output.
-9. A failed transfer leaves the current persisted frame and panel contents unchanged.
-10. Every path into deep sleep (after a timer wake, a successful transfer, a failed or timed-out transfer, or a low-battery skip) re-arms the 24-hour RTC timer for a full 24 hours from that moment. A button wake therefore postpones the next scheduled refresh.
-11. Do not enter deep sleep while SW7/GPIO13 (active-high) is still held, otherwise the pin level immediately wakes the device again. Wait for release (with debounce) first. Presses during a refresh or transfer are ignored.
-12. The ESP32-S3 RTC timer runs from the internal RC slow clock, which is not crystal-accurate and drifts with temperature and supply; several percent error, i.e. an hour or more per 24 h, is plausible. "Every 24 hours" is therefore nominal. Measure the actual period at bring-up; it does not need correction unless the refresh time of day matters.
+6. Decode, stretch to the orientation chosen on the upload page (landscape 1600×1200 or portrait 1200×1600), apply the required Spectra 6 color conversion and dithering, persist a display-ready frame with its orientation and battery-indicator corner, and render only a complete, decodable, integrity-checked image. Every refresh overlays a small battery-percentage box in the chosen corner (top right by default). On a cold boot with a valid photo saved, refresh it.
+7. On an RTC wake, refresh the persisted frame with Wi-Fi disabled, then return to deep sleep. If no valid photo is saved (first boot, never uploaded, or corrupt), refresh a generated default frame instead: white screen with a small battery-percentage rectangle.
+8. On a button wake, three SW7/GPIO13 presses within 3 s from wake (counting the waking press) trigger a manual refresh: the same battery-guarded, Wi-Fi-off path as the RTC refresh. It does not clear the low-battery latch. At most one manual refresh per hour; a triple press within the hour is ignored. See [SW7 gestures](../firmware/STATE_MACHINE.md#sw7-gestures).
+9. Below the measured low-battery threshold, or while the low-battery latch is set, do not start Wi-Fi or a display refresh; the converter's built-in cutoff disables its output. When the latch first sets, show a "Replace batteries" screen once, only if the voltage still has margin for that refresh.
+10. A failed transfer (before the page reports "received") leaves the current persisted frame and panel contents unchanged. If a received photo then fails to decode, validate, or save, refresh the previous picture with a red exclamation mark in the battery box; if no valid photo was saved, refresh the white default frame with the red mark instead. The mark stays until the next successful upload.
+11. The 24-hour period restarts only when a refresh happens (daily, manual, cold boot, after an upload, or error-mark refresh). Wakes without a refresh (short press, upload timeout, rate-limited triple press) re-arm the timer for the remaining time, so they do not postpone the daily refresh. A low-battery skip arms a full 24 hours to re-check.
+12. Do not enter deep sleep while SW7/GPIO13 (active-high) is still held, otherwise the pin level immediately wakes the device again. Wait for release (with debounce) first. If it is still held after 60 s (stuck or pressed by the enclosure), sleep with only the RTC timer armed and re-enable button wake on a later timer wake once it is released. Presses during a refresh or transfer are ignored.
+13. The ESP32-S3 RTC timer runs from the internal RC slow clock, which is not crystal-accurate and drifts with temperature and supply; several percent error, i.e. an hour or more per 24 h, is plausible. "Every 24 hours" is therefore nominal. Measure the actual period at bring-up; it does not need correction unless the refresh time of day matters.
 
 ## Image transfer (Wi-Fi access point and web page)
 
 **Decision.** Bluetooth Classic (the phone/PC "send file via Bluetooth" feature) is not available on the ESP32-S3, and generic BLE apps cannot practically send a multi-megabyte file with chunking, acknowledgements and integrity checks. The frame therefore serves a web page over its own Wi-Fi access point, which any phone or laptop browser can use with no app. This is a compromise: the project owner would prefer Bluetooth (see "Future: Bluetooth").
 
 - Flow: button wake, AP up, user joins `HOF-Frame` and opens the upload page (a captive-portal DNS responder is optional), picks an image, the browser POSTs it, and the page shows the result.
-- TCP already provides ordering, retransmission and flow control, so no custom chunk or acknowledgement protocol is needed. Integrity can use an optional CRC-32 or SHA-256 header computed by the page.
-- There is no pre-processing client (the page may optionally resize in JavaScript later), so the device must decode, resize or crop, color-convert and dither within the memory limits below.
+- The page shows "sleeping in X seconds" while waiting for an upload, using
+  the board's remaining idle window; opening or reloading it does not restart
+  that window. Upload start replaces the countdown with progress/status.
+  Successful receipt shows that Wi-Fi is closing and the screen will update
+  before sleep, not a claim that rendering has already succeeded. See the
+  [user-facing upload flow](../firmware/STATE_MACHINE.md#what-the-user-sees-during-the-upload-window).
+- TCP already provides ordering, retransmission and flow control, so no custom chunk or acknowledgement protocol is needed. No extra checksum is used; decode validation rejects damaged images.
+- There is no pre-processing client (the page may optionally resize in JavaScript later), so the device must decode, resize, color-convert and dither within the memory limits below.
 - Accepted formats: PNG and JPEG.
 - Maximum size: 4 MiB for the encoded upload.
 - Reject unsupported types and a `Content-Length` over the limit before allocating storage. Enforce the limit on declared size and on cumulative received bytes while streaming, and reject chunked or unknown-length bodies that exceed it.
@@ -248,7 +264,11 @@ Required behavior:
 - Start the five-minute idle timer when the AP comes up and cancel it once an upload request starts. Replace it with a transfer-inactivity timeout and an absolute deadline so a stalled client cannot keep the frame awake.
 - Decode only after the complete upload has been received and validated.
 - Reject images whose decoded width, height, pixel count, or working-memory requirement exceeds configured decoder limits, regardless of encoded size. This prevents decompression bombs and oversized malformed images from exhausting RAM.
-- Stretch or crop every accepted image to exactly 1600×1200, then map pixels to the display's Spectra 6 palette with mandatory dithering.
+- The page lets the person choose landscape or portrait layout and the battery-indicator corner. Stretch every accepted image to the chosen layout (crop-to-fill or fit-with-borders may be added as page options later), then map pixels to the display's Spectra 6 palette with mandatory dithering.
+- The battery box initially measures 160 x 64 pixels, with 32-pixel-high
+  smooth text, a white background and black border, and a 16-pixel margin
+  from the selected corner. Allow room for `100%` and the red error mark.
+  Verify appearance on the panel before finalizing the font and layout.
 - Store only the current encoded upload in bounded temporary memory. Discard it after successful rendering, but retain the display-ready frame in non-volatile storage so the mandatory 24-hour refresh can reproduce it. Update that stored frame atomically only after complete image validation.
 
 Rust side: `esp-idf-svc` provides the AP (`EspWifi` in AP mode) and `EspHttpServer`, with a GET handler for the page and a POST handler that streams the body into a PSRAM buffer.
@@ -274,19 +294,24 @@ Set the decoder limits from measured PSRAM usage during milestone 7.
 An inactivity timeout alone does not stop a client that sends one chunk every few seconds. In addition to the five-minute idle timer and the transfer-inactivity timeout, enforce:
 
 - an absolute deadline for the whole transfer, measured from the start of the upload request;
-- a global maximum awake time per wake cycle;
-- a hardware watchdog so a hung firmware still returns to deep sleep.
+- an initial global awake-time budget of 10 minutes from boot, including
+  processing, refresh, and cleanup; reserve time before starting work rather
+  than blindly interrupting flash writes or panel refreshes, and verify the
+  budget against measured worst-case timings;
+- a hardware watchdog to reset hung firmware, with boot-time recovery that
+  checks the reset reason and work-in-progress marker before returning to
+  safe sleep rather than repeating the failed work.
 
 Wi-Fi throughput through the ESP32-S3 access point is roughly 0.5–2 MB/s, so a 4 MiB upload should take seconds to tens of seconds. Choose the absolute deadline from measured transfers. For comparison, BLE would be roughly 10–80 kB/s (about a minute to several minutes).
 
-Still to be decided: the AP SSID and password handling, the transfer-inactivity timeout, and whether to use a CRC-32 or SHA-256 header.
+Decided: SSID `HOF-Frame` with a build-time WPA2 password kept out of git; transfer-inactivity timeout and absolute transfer deadline both 2 minutes initially (easy-to-change constants); no upload checksum. If the battery reading fails, the battery box shows `?` and the frame carries on, relying on the converter's hardware cutoff.
 
 ## Firmware milestones
 
-1. Confirm the ESP32-S3-WROOM-1 configuration, board GPIO map (including whether proposed battery-sense pin GPIO4 / ADC1_CH3 is broken out, or identify an alternative ADC input), display bus, SW2/GPIO12 (active-high) wake behavior, PSRAM, flash layout, and Wi-Fi AP support.
+1. Confirm the ESP32-S3-WROOM-1 configuration, board GPIO map (including whether proposed battery-sense pin GPIO4 / ADC1_CH3 is broken out, or identify an alternative ADC input), display bus, SW7/GPIO13 (active-high) wake behavior, PSRAM, flash layout, and Wi-Fi AP support.
 2. Create a minimal ESP-IDF-backed Rust project that builds, can be flashed during development, logs the wake cause, enters deep sleep, and redraws after SW7/GPIO13 wakes it. Measure the whole board's deep-sleep current at its 5 V input as early as possible, since it dominates the battery budget.
 3. Bring up the display with a simple test pattern and validate the refresh sequence.
-4. Implement SW2 and 24-hour RTC wake handling, including the low-battery behavior for scheduled refreshes.
+4. Implement SW7/GPIO13 gesture classification (five-second hold for upload, triple press for manual refresh) and 24-hour RTC wake handling, including the low-battery behavior for scheduled and manual refreshes.
 5. Implement the Wi-Fi access point, HTTP server and upload page with the receive window; measure real transfer duration and shorten the five-minute timeout to limit awake time and exposure.
 6. Implement the streamed PNG/JPEG upload with the 4 MiB guardrail and the transfer deadlines.
 7. Decode, color-map, atomically persist, and render one validated image.
