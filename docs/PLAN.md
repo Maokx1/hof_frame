@@ -9,8 +9,8 @@ Build a Hall of Fame frame around a 13.3-inch GDEP133C02 Spectra 6 color e-ink d
 - Display: Good Display GDEP133C02, 13.3-inch, 1600×1200, Spectra 6 color e-ink.
 - Controller: Good Display ESP32-133C02 with ESP32-S3-WROOM-1.
 - Memory: 16 MB flash and 8 MB octal PSRAM, corroborated by third-party research of Good Display's firmware (not yet measured on this board); confirm usable configuration during bring-up.
-- Wake button: SW2 on GPIO12, documented by Good Display as **active-high** (reads high when pressed). GPIO12 is an RTC-capable pin on the ESP32-S3, so it can wake from deep sleep. SW2–SW4 exist only on the board revision with the three onboard buttons; confirm the received board has them, and check against the schematic whether an external pull-down is fitted (otherwise use the internal pull-down).
-- Battery-sense ADC: **GPIO4 / ADC1_CH3 is the proposed pin in the wiring model, but is not yet confirmed to be broken out on the received board**. The board's documented pin table uses nearly every exposed GPIO (display, microSD, buttons, UART, USB), and GPIO4 is not in that table; verify it against the board schematic or headers before wiring the divider. If GPIO4 is inaccessible, identify another spare ADC1 pin or consider desoldering an unused onboard part (for example the SW3 or SW4 button on GPIO13/GPIO14). Those are ADC2 pins, which are unreliable while Wi-Fi is running, so sample the battery before starting Wi-Fi (as the plan already requires).
+- Wake button: the received board's user switches were probed and identified as **SW8 on GPIO12 and SW7 on GPIO13**, both usable as active-high inputs. The firmware uses GPIO13/SW7 as the deep-sleep wake button; a five-second press redraws the display after wake and shorter presses are ignored. The documented SW2/SW3/SW4 buttons are not fitted on this board.
+- Battery-sense ADC: **GPIO4 / ADC1_CH3 is the proposed pin in the wiring model, but is not yet confirmed to be broken out on the received board**. The board's documented pin table uses nearly every exposed GPIO (display, microSD, buttons, UART, USB), and GPIO4 is not in that table; verify it against the board schematic or headers before wiring the divider. If GPIO4 is inaccessible, identify another spare ADC1 pin. Sample the battery before starting Wi-Fi.
 - Battery: four matched Green Cell AAA (R03) 950 mAh NiMH cells in a series holder. The series pack is 950 mAh at approximately 4.8 V nominal (4.56 Wh nominal).
 - Battery holder: [Allegro 4×AAA holder with integrated switch](https://allegro.pl/produkt/koszyk-na-4-baterie-aaa-4xaaa-z-wlacznikiem-czarny-4c5bce7c-e839-49d4-b6d2-8abc42cdc347?offerId=17382812988).
 - Reverse-polarity protection: none. The battery holder fixes the cell polarity, so a protector module was dropped to keep the first build simple and to save its quiescent current and voltage drop.
@@ -53,6 +53,21 @@ do not treat total pack voltage alone as a guarantee against an individual
 cell being over-discharged.
 
 The holder listing and board specifications must be checked against the physical parts when received. Record measured dimensions, switch behavior, wiring, current draw, display timing, and battery runtime separately from these assumptions.
+
+### Received board findings
+
+Checked against photos of the received board and Good Display's ESP32-133C02-IL specification and panel schematic (the panel schematic does not cover the driver board).
+
+- **Buttons.** SW2, SW3 and SW4 (GPIO12/13/14) are not fitted and no empty footprints for them were found. The two fitted switches on the right edge are labelled SW7 and SW8; probing showed **SW8 drives GPIO12 and SW7 drives GPIO13**, both active-high. The firmware uses SW7/GPIO13 as its RTC wake input. SW8/GPIO12 remains available for a future function. The previous assumption that these switches only drove the IP5306 was incorrect.
+- **Onboard Li-ion charger.** An IP5306 power-bank IC (U14) and a battery connector are fitted. The board is designed for one Li-ion cell. **Never connect the NiMH pack to the board's battery connector**; the IP5306 would try to charge it as a 4.2 V cell.
+- **NiMH path is questionable.** The planned converter, diode, then board 5 V input feeds the IP5306's USB-side input. Before committing to it:
+  - Confirm the pad used is VBUS (the IP5306 input), not its 5 V output.
+  - The IP5306 typically needs about 4.5 V or more on its input, and the 1N5822 drops 0.4–0.5 V, so set the converter to about 5.1–5.2 V and measure VBUS under load, especially during a refresh.
+  - Power-bank ICs usually switch their output off after about 30 s of light load; confirm the board survives a minute of deep sleep.
+  - The IP5306 and charge path add to the board sleep current, which is still unmeasured. Measure it before trusting the runtime estimate.
+  - If sleep current or output shut-off is a problem, the fallback is to remove or bypass the IP5306 and power the 5 V rail directly (invasive).
+- **Panel pins** (from the specification and the vendor example): SPI SCK GPIO9, MOSI GPIO41, MISO GPIO40, CS_M GPIO18, CS_S GPIO17, RST GPIO6, BUSY GPIO7 (low while busy), and a panel power **load switch on GPIO45** (high = on). `firmware/src/epd.rs` ports the vendor init sequence.
+- **Debug port.** The native USB-Serial/JTAG enumerates as `303a:1001`, `/dev/ttyACM0`. In deep sleep the port disappears, and with no wake input the board must be unplugged and re-plugged (or reset) to flash again.
 
 ### Battery-runtime target
 
@@ -206,7 +221,7 @@ flowchart TD
 
 Required behavior:
 
-1. Wake from deep sleep using SW2/GPIO12 or the 24-hour RTC timer and identify the wake cause.
+1. Wake from deep sleep using SW7/GPIO13 or the 24-hour RTC timer and identify the wake cause.
 2. On a button wake, start a Wi-Fi access point (WPA2, password printed on the frame) and an HTTP server that serves a single upload page at `http://192.168.4.1`.
 3. Start a five-minute idle timer when the access point comes up, then shorten it after measuring real transfers.
 4. Cancel the idle timer when an upload request starts and apply the transfer deadline instead.
@@ -216,7 +231,7 @@ Required behavior:
 8. Below the measured low-battery threshold, or while the low-battery latch is set, do not start Wi-Fi or a display refresh; the converter's built-in cutoff disables its output.
 9. A failed transfer leaves the current persisted frame and panel contents unchanged.
 10. Every path into deep sleep (after a timer wake, a successful transfer, a failed or timed-out transfer, or a low-battery skip) re-arms the 24-hour RTC timer for a full 24 hours from that moment. A button wake therefore postpones the next scheduled refresh.
-11. Do not enter deep sleep while SW2 (active-high) is still held, otherwise the pin level immediately wakes the device again. Wait for release (with debounce) first. Presses during a refresh or transfer are ignored.
+11. Do not enter deep sleep while SW7/GPIO13 (active-high) is still held, otherwise the pin level immediately wakes the device again. Wait for release (with debounce) first. Presses during a refresh or transfer are ignored.
 12. The ESP32-S3 RTC timer runs from the internal RC slow clock, which is not crystal-accurate and drifts with temperature and supply; several percent error, i.e. an hour or more per 24 h, is plausible. "Every 24 hours" is therefore nominal. Measure the actual period at bring-up; it does not need correction unless the refresh time of day matters.
 
 ## Image transfer (Wi-Fi access point and web page)
@@ -269,7 +284,7 @@ Still to be decided: the AP SSID and password handling, the transfer-inactivity 
 ## Firmware milestones
 
 1. Confirm the ESP32-S3-WROOM-1 configuration, board GPIO map (including whether proposed battery-sense pin GPIO4 / ADC1_CH3 is broken out, or identify an alternative ADC input), display bus, SW2/GPIO12 (active-high) wake behavior, PSRAM, flash layout, and Wi-Fi AP support.
-2. Create a minimal ESP-IDF-backed Rust project that builds, can be flashed during development, logs the wake cause, and enters/exits deep sleep. Measure the whole board's deep-sleep current at its 5 V input as early as possible, since it dominates the battery budget.
+2. Create a minimal ESP-IDF-backed Rust project that builds, can be flashed during development, logs the wake cause, enters deep sleep, and redraws after SW7/GPIO13 wakes it. Measure the whole board's deep-sleep current at its 5 V input as early as possible, since it dominates the battery budget.
 3. Bring up the display with a simple test pattern and validate the refresh sequence.
 4. Implement SW2 and 24-hour RTC wake handling, including the low-battery behavior for scheduled refreshes.
 5. Implement the Wi-Fi access point, HTTP server and upload page with the receive window; measure real transfer duration and shorten the five-minute timeout to limit awake time and exposure.
