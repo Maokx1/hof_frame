@@ -103,8 +103,8 @@ next refresh restores the picture.
 | Holder BAT+ after switch | Voltage-sensor module VIN/+ | Battery measurement source | Battery side, before the converter |
 | Holder BAT− | Voltage-sensor module GND/− | Measurement return | Common system ground |
 | Voltage-sensor module VOUT/S | GPIO4 / ADC1_CH3 | Pack-voltage sense | Proposed in [`wiring_model`](wiring_model), not confirmed broken out; check the board schematic or headers, plus the module output range and ratio, before wiring |
-| SW7 | GPIO13 | Received-board wake input, active-high, RTC-capable | Fitted switch; firmware wakes from deep sleep and redraws the display |
-| SW8 | GPIO12 | Received-board input, active-high, RTC-capable | Fitted switch; confirmed by GPIO probe, currently unused |
+| SW7 | GPIO13 | **Pull-up, active-low**, RTC-capable | Fitted switch; firmware wakes from deep sleep and redraws the display |
+| SW8 | GPIO12 | **Pull-up, active-low**, RTC-capable | Fitted switch; same polarity confirmed by the user, currently unused |
 | ESP32-133C02 display connector | GDEP133C02 | Supplied display cable | Do not substitute a cable or assume pin order |
 
 The USB-C input on the controller must not be used in a way that back-feeds

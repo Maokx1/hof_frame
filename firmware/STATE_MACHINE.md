@@ -7,20 +7,27 @@ implemented behavior and build instructions.
 
 ## Current baseline and hardware constraints
 
-- [main.rs](src/main.rs) currently renders the bring-up test card and now
-  handles SW7 wake, the three-second triple-press manual refresh, the
-  five-second hold (test-card fallback until Wi-Fi upload exists), a nominal
-  24-hour RTC refresh deadline, hourly manual-refresh rate limit, and
-  timer-only sleep after a button remains held for 60 seconds. The refresh
-  timestamp is retained in RTC memory across deep sleep; power-on without a
-  valid timestamp refreshes immediately.
+- [main.rs](src/main.rs) currently renders the bundled bring-up image, handles
+  SW7 wake, classifies the three-second triple-press and five-second hold, and
+  enters deep sleep with a nominal 24-hour RTC refresh timer. It retains the
+  last successful refresh time in RTC memory across deep sleep and
+  rate-limits manual refreshes. A held button is given up to 60 seconds to
+  release before button wake is disabled for that sleep. The five-second hold
+  is detected but only logged; the upload window is not implemented. A failed
+  scheduled refresh is retried after 24 hours to avoid a rapid retry loop.
+- An RTC-retained in-progress marker suppresses immediate retry after a
+  brownout or reset during refresh. This is a bring-up guard only; it does not
+  replace the target persistent work marker or low-battery latch. An allowed
+  explicit triple-press manual refresh overrides this cooldown.
 - This is still bring-up firmware: there is no Wi-Fi upload, saved-photo
-  storage, default white frame, battery check/latch, or production error
-  recovery yet. The low-battery and frame-storage branches below specify
-  target behavior, not code that is in place.
+  storage, default white frame, battery check/latch, or persistent work
+  marker yet. The low-battery and frame-storage branches below specify target
+  behavior, not code that is in place.
 - [epd.rs](src/epd.rs) provides panel initialization, pixel streaming, refresh,
-  BUSY timeout, and power-off through the GPIO45 load switch.
-- SW7/GPIO13 is the active-high RTC wake input. SW8/GPIO12 has no assigned
+  waits while the active-low BUSY input is low (up to a 120-second timeout),
+  and powers the panel off through the GPIO45 load switch. It does not require
+  a new BUSY-low edge after a command.
+- SW7/GPIO13 is the active-low, pull-up RTC wake input. SW8/GPIO12 has no assigned
   application function. SW2 is not fitted on the received board.
 - Battery ADC GPIO4/ADC1_CH3 is only proposed: confirm accessibility, divider
   ratio, and calibration before enabling battery guards. The PoC divider and
@@ -404,7 +411,7 @@ separately.
   low-battery skip, arm a full 24 hours. Measure RC-clock drift.
 - Stop the radio and cut panel power on every recoverable exit, including init,
   decode, storage, and BUSY failures. Retain an explicit error if shutdown fails.
-- Do not arm active-high GPIO wake and sleep while SW7 is held. Debounce
+- Do not arm active-low GPIO wake and sleep while SW7 is held. Debounce
   release. **Stuck button:** if SW7 is still pressed after **60 s** of waiting,
   sleep with only the RTC timer armed (button wake disabled) and log it. On the
   next timer wake, re-enable button wake if SW7 is released; if it is still
