@@ -7,14 +7,12 @@ resolver = "2"
 rust-version = "1.82"
 default-run = "firmware"
 
+[features]
+debug-button-sleep = []
+
 [[bin]]
 name = "firmware"
 harness = false # do not use the built-in cargo test harness -> resolve rust-analyzer errors
-
-[[bin]]
-name = "gpio_probe"
-path = "src/bin/gpio_probe.rs"
-harness = false
 
 [profile.release]
 opt-level = "s"
@@ -34,3 +32,6 @@ font8x8 = { version = "0.3", default-features = false }
 
 [build-dependencies]
 embuild = "0.33"
+
+[lints.rust]
+dead_code = "allow"
