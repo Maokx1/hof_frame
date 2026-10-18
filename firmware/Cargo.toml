@@ -9,6 +9,12 @@ default-run = "firmware"
 
 [features]
 debug-button-sleep = []
+debug-gestures = []
+debug-interrupted-work = ["debug-gestures"]
+debug-frame-storage = ["debug-gestures"]
+debug-upload = ["debug-gestures", "dep:png"]
+debug-upload-display = ["debug-upload"]
+debug-battery-preview = ["debug-upload-display"]
 
 [[bin]]
 name = "firmware"
@@ -29,6 +35,8 @@ esp-idf-svc = { git = "https://github.com/esp-rs/esp-idf-svc.git" }
 log = "0.4"
 esp-idf-svc = { version = "0.52.1" }
 font8x8 = { version = "0.3", default-features = false }
+png = { version = "0.17", optional = true }
+fontdue = { version = "0.9", default-features = false, features = ["std"] }
 
 [build-dependencies]
 embuild = "0.33"

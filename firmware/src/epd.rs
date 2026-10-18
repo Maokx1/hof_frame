@@ -130,11 +130,18 @@ impl Epd {
                 &bus,
                 sys::spi_common_dma_t_SPI_DMA_CH_AUTO,
             ))?;
-            esp!(sys::spi_bus_add_device(
+            if let Err(error) = esp!(sys::spi_bus_add_device(
                 sys::spi_host_device_t_SPI3_HOST,
                 &dev,
                 &mut spi,
-            ))?;
+            )) {
+                if let Err(cleanup_error) =
+                    esp!(sys::spi_bus_free(sys::spi_host_device_t_SPI3_HOST))
+                {
+                    log::error!("SPI setup cleanup failed: {cleanup_error:?}");
+                }
+                return Err(error);
+            }
         }
 
         // Let the panel supply settle after the load switch turns on.
@@ -307,5 +314,14 @@ impl Epd {
         sleep(Duration::from_millis(50));
         set_level(PIN_LOAD_SW, false);
         result
+    }
+
+    pub fn close(self) -> Result<(), EspError> {
+        set_level(PIN_LOAD_SW, false);
+        unsafe {
+            esp!(sys::spi_bus_remove_device(self.spi))?;
+            esp!(sys::spi_bus_free(sys::spi_host_device_t_SPI3_HOST))?;
+        }
+        Ok(())
     }
 }
