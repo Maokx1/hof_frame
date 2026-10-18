@@ -7,22 +7,106 @@ implemented behavior and build instructions.
 
 ## Current baseline and hardware constraints
 
-- [main.rs](src/main.rs) currently renders the bundled bring-up image, handles
+- [main.rs](src/main.rs) normally renders a validated saved packed frame or a
+  plain white fallback with a render-time battery box showing `?`, handles
   SW7 wake, classifies the three-second triple-press and five-second hold, and
   enters deep sleep with a nominal 24-hour RTC refresh timer. It retains the
   last successful refresh time in RTC memory across deep sleep and
   rate-limits manual refreshes. A held button is given up to 60 seconds to
   release before button wake is disabled for that sleep. The five-second hold
-  is detected but only logged; the upload window is not implemented. A failed
+  is detected but only logged; the upload window is not implemented. The
+  gesture timing and debounce classifier has deterministic unit tests in
+  `src/gesture.rs`; those tests do not qualify hardware timing. A failed
   scheduled refresh is retried after 24 hours to avoid a rapid retry loop.
-- An RTC-retained in-progress marker suppresses immediate retry after a
-  brownout or reset during refresh. This is a bring-up guard only; it does not
-  replace the target persistent work marker or low-battery latch. An allowed
-  explicit triple-press manual refresh overrides this cooldown.
-- This is still bring-up firmware: there is no Wi-Fi upload, saved-photo
-  storage, default white frame, battery check/latch, or persistent work
-  marker yet. The low-battery and frame-storage branches below specify target
-  behavior, not code that is in place.
+- The `debug-gestures` feature exercises that same classifier with mocked
+  deep sleep and mocked refresh/upload actions. It stays awake with continuous
+  USB logging, treats the first SW7 press as wake, reports the result, and
+  rearms after debounced release. It never powers the panel or starts Wi-Fi.
+  Shared scheduling logic in [schedule.rs](src/schedule.rs) is exercised with
+  a 120-second daily interval, a 30-second manual limit, and one-second
+  simulated successful refreshes. No-work wakes preserve the daily deadline;
+  timer refreshes remain active while waiting for button release. Normal
+  builds retain 24-hour/one-hour intervals and keep scheduling state in RTC
+  memory. Both paths advance last-success timing only on refresh completion.
+  Actual sleep/wake and boot latency are not tested in this mode.
+  The real-sleep `debug-button-sleep` mode repeats recorded abort reasons and
+  boot-time EXT1 masks while aborted; RTC diagnostics are not persistent
+  safety metadata.
+- The normal path commits an NVS work marker before refreshing and clears it
+  after successful refresh/panel shutdown. Brownout, unfinished work, unknown
+  metadata, or refresh failure latch work off; manual refresh cannot override
+  it. NVS errors explicitly block work without automatic partition erasure.
+  RTC cooldown remains supplementary scheduling metadata, not the safety latch.
+  Normal acknowledgement is disabled until calibrated battery recovery checks
+  exist. Mock mode has a separate safety namespace, explicitly simulated safe
+  recovery voltage, and `debug-interrupted-work` injection that rereads the
+  committed marker without a real reset or USB disconnect. NVS power-loss
+  guarantees still need hardware qualification; missing metadata initializes
+  as first use and external erasure cannot be distinguished from first use.
+- Packed-frame storage uses two 1 MiB slots in the 2 MiB `frames` partition,
+  with size/palette/header/payload validation, CRC32s, generation selection,
+  and header/tag-last publication after candidate readback. Normal rendering
+  maps validated flash or generates white; invalid slots are logged. The
+  `debug-frame-storage` feature commits/reloads/maps a full bundled fixture
+  under the mock work marker without panel refresh or deep sleep. Frame format,
+  rotation mapping, and torn-write behavior have host tests, not yet hardware
+  acceptance. Orientation/corner metadata drives the render-time status box.
+- `debug-upload` adds a real one-client WPA2 AP and local upload page to mock
+  sleep mode. The receiver accepts bounded fixed-length/chunked raw PNG/JPEG
+  bytes into PSRAM, checks the signature, responds with receipt-only status,
+  shuts Wi-Fi down, then decodes a display-sized static PNG by rows, applies
+  ordered six-color dithering, and atomically saves/reloads the packed frame.
+  The page accepts PNG/JPEG and normalizes them to the chosen resolution
+  using browser resizing; direct JPEG decoding on the board is not supported.
+  PNG decoding sets a 128 KiB library-tracked allocation limit (not a total
+  inflater workspace cap) and rejects wrong dimensions,
+  interlacing, animation, and malformed input. The encoded upload and packed
+  candidate use PSRAM; no full RGB image is allocated on the board.
+  The mock work marker covers receiver, radio cleanup, decoding, and save.
+  Decode rejection leaves the saved frame unchanged and cleans up; memory/
+  storage faults latch work off. Panel refresh remains mocked unless the
+  explicit `debug-upload-display` feature is enabled.
+  That mode refreshes the validated saved frame after a successful upload/
+  commit, with radio off and the encoded buffer released. The Working marker
+  covers display, power-off, and SPI cleanup; failure latches without retry.
+  Successful real display restarts the daily deadline. Startup, timer, and
+  triple-press physical refreshes remain disabled in this mode; deep sleep
+  stays mocked so USB logs continue. Use stable bench power; battery safety
+  is still simulated.
+  Credentials come from a local build environment variable, with no default.
+  The AP explicitly configures `192.168.4.1/24` with DHCP; the ready message
+  uses the checked live interface address after binding the HTTP listener.
+  Idle/transfer/header/global deadlines and byte bounds are implemented.
+  Header-stage failures close only the rejected TCP connection, not the
+  hotspot; the initial idle/global deadline remains unchanged. Accepted
+  upload-body failures still end the attempt and clean up the radio.
+  Board logs confirm PSRAM tests, the corrected AP/DHCP subnet, receipt of
+  3,192,335 bytes into PSRAM, receipt-response send, radio cleanup, and return
+  to Clean mock sleep with the daily deadline unchanged and USB connected.
+  Decode/commit and receiver boundary/failure paths still need qualification.
+  The first decode aborted on a 128 KiB internal-heap inflater allocation;
+  reboot correctly latched interrupted work. PSRAM-backed malloc is now
+  enabled, with a startup Rust Vec allocation/growth regression check; this
+  fix is board-confirmed: the 3,278,491-byte upload converted and committed/
+  reloaded as slot 0/generation 3, CRC 949275097, then returned to Clean.
+  The user reported upload-to-display worked flawlessly. Repeated cleanup
+  and failure-path behavior still need qualification.
+- A render-time 120 x 48 status box uses a subset DejaVu Sans outline font,
+  24-pixel question-mark height, black text/border on white, and 16-pixel
+  layout-relative corner margins. Text and placement rotate with landscape.
+  Ordered black/white coverage represents antialiased outline edges without
+  unsupported grayscale colors. Saved frame pixels are untouched. Both
+  normal saved/default rendering and the upload-display test use this overlay;
+  baseline sunflower diagnostics stay unchanged. Battery measurement is not
+  qualified, so all current renders show `?`. Physical preview is pending.
+  The label now uses a leading 17 x 11 filled battery icon and `?%` when unknown,
+  or simulated `100%` with `debug-battery-preview`. Text scales down from a
+  maximum 24-pixel height to fit the icon and label without enlarging the box.
+  The full icon is a fixed symbol, not a measured charge level.
+  Box width and height are 75% of the original 160 x 64 design.
+- This is still bring-up firmware: normal upload/decode, battery measurement,
+  persistent upload-error marks, and voltage-driven battery check/latch do
+  not exist. Real display after upload is an explicit debug-only opt-in.
 - [epd.rs](src/epd.rs) provides panel initialization, pixel streaming, refresh,
   waits while the active-low BUSY input is low (up to a 120-second timeout),
   and powers the panel off through the GPIO45 load switch. It does not require
@@ -32,7 +116,19 @@ implemented behavior and build instructions.
 - Battery ADC GPIO4/ADC1_CH3 is only proposed: confirm accessibility, divider
   ratio, and calibration before enabling battery guards. The PoC divider and
   later PCB divider differ; see [wiring requirements](../docs/WIRING.md).
-- Confirm usable flash and PSRAM before choosing partitions and decoder limits.
+- Hardware is the N16R8 module: 16 MiB flash (programmer-confirmed) and 8 MiB
+  PSRAM. Board logs confirm octal 40 MHz initialization, the boot memory test,
+  and `debug-upload` verification of physical capacity and a 4 MiB
+  allocation/write/read test.
+  Ordinary malloc/Rust allocations above 16 KiB now prefer PSRAM so decoder
+  workspace does not depend on contiguous internal heap. Small allocations
+  prefer internal RAM; allocator fallback is allowed. A 32 KiB internal pool
+  is reserved for internal/DMA requests. Explicit upload/frame allocations
+  remain PSRAM-only.
+  The [partition table](partitions.csv) reserves 4 MiB for encoded uploads,
+  separate from the packed-frame slots and 24 KiB NVS. The 4 MiB encoded limit
+  is unchanged; the receiver explicitly allocates at most 4 MiB PSRAM rather
+  than internal RAM. Decoder/working-memory budgets still need implementation.
   The current driver streams 1200 x 1600 portrait pixels; photos may be shown
   in landscape or portrait as chosen on the upload page (see
   [photo orientation and fit](#photo-orientation-and-fit)). Define and test the
@@ -43,7 +139,7 @@ implemented behavior and build instructions.
 
 Deep-sleep wake restarts the program; it does not resume an in-memory state.
 Read the reset reason, wake cause, persistent safety metadata, and calibrated
-battery voltage before dispatching work. A GPIO high wakes the MCU immediately;
+battery voltage before dispatching work. A GPIO13 low wakes the MCU immediately;
 the button gesture is classified in firmware after wake (see
 [SW7 gestures](#sw7-gestures)).
 
@@ -156,7 +252,7 @@ it into the stored photo, so the value is current on each daily refresh.
   failed reading cannot set the low-battery latch, but brownout and
   unfinished-work latching still apply.
 - Style: black text on a white box with a black border. Initial dimensions:
-  **160 x 64 pixels**, with **32-pixel-high smooth text** and a **16-pixel
+  **120 x 48 pixels**, with up to **24-pixel-high smooth text** and a **16-pixel
   margin** from the two edges of the selected corner. Use a smooth font
   rather than the test screen's bitmap style; select the font and rendering
   support during implementation. Fit `100%` and the red error mark together
@@ -182,8 +278,11 @@ after the latch is cleared shows it again.
 - The person chooses **landscape (1600 x 1200) or portrait (1200 x 1600)** on
   the upload page. Store it with the frame metadata. The firmware maps the
   chosen layout onto the panel's native 1200 x 1600 portrait pixel order.
-- Initially every photo is **stretched** to fill the chosen layout. Crop-to-fill
-  and fit-with-borders can be added later as further options on the page.
+- The upload page offers **Stretch** (fill the chosen layout, changing
+  proportions) and **Fit** (preserve the whole image with white borders).
+  Browser canvas resizing produces a display-sized PNG before transmission;
+  both source and transmitted file are limited to 4 MiB in the current page.
+  Crop-to-fill is not implemented.
 
 ### State contracts
 
@@ -213,7 +312,7 @@ runs; the wake cause records it.
 
 | Gesture | Detection | Action |
 | --- | --- | --- |
-| Long hold | The waking press stays continuously high for five seconds. | Open the upload window. |
+| Long hold | The waking press stays continuously low (pressed) for five seconds, ignoring sub-debounce chatter. | Open the upload window. |
 | Triple press | Two more debounced presses after the waking press, all within the gesture window measured from wake. | Manual refresh of the persisted frame, Wi-Fi off (same path as the RTC refresh). |
 | Anything else | Fewer presses, or a hold released before five seconds, by the end of the window. | Return to sleep. |
 
@@ -237,7 +336,8 @@ within the gesture window; `timeout` means the window expired first.
   bench against boot time and comfortable press speed. A long hold is
   separate: it only counts on the waking press, and needs the full five seconds.
 - Detect presses by polling or edge interrupt with roughly 20–50 ms debounce;
-  count rising edges, not samples.
+  count debounced falling edges (released HIGH to pressed LOW), not samples.
+  Resolve any pending release debounce before accepting a five-second hold.
 - Decide on the third press; further presses are ignored. Before sleep, wait
   for release as on every other path.
 - Manual refresh goes through the battery guard, latch, `LoadFrame`, and
@@ -251,6 +351,9 @@ within the gesture window; `timeout` means the window expired first.
   memory; after power loss the limit resets, which is acceptable.
 - Start the gesture timer at wake and keep sampling SW7 during boot and the
   battery check, so a quick second press is not missed.
+  Current bring-up timing starts at Rust application entry, after bootloader
+  execution; edges before GPIO sampling are not captured. The normal path
+  classifies before logging/recovery work; battery sampling is not implemented.
 
 ## Upload and image transaction
 
