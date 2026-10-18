@@ -28,10 +28,14 @@ fn n16r8_partition_budget_preserves_four_mib_encoded_limit() {
 }
 
 #[test]
-fn bundled_storage_fixture_has_exact_length_and_supported_palette() {
-    let fixture = include_bytes!("../assets/sunflower.bin");
+fn generated_storage_fixture_has_exact_length_and_supported_palette() {
+    let fixture: Vec<_> = [0x01, 0x23, 0x56]
+        .into_iter()
+        .cycle()
+        .take(FRAME_BYTES)
+        .collect();
     assert_eq!(fixture.len(), FRAME_BYTES);
-    assert!(valid_pixels(fixture));
+    assert!(valid_pixels(&fixture));
 }
 
 struct Flash {

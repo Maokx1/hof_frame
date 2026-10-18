@@ -10,7 +10,6 @@ mod safety_nvs;
 #[cfg(feature = "debug-upload")]
 mod upload_wifi;
 
-use std::thread::sleep;
 use std::time::{Duration, Instant};
 
 use esp_idf_svc::hal::delay::FreeRtos;
@@ -18,38 +17,22 @@ use esp_idf_svc::hal::gpio::Pull;
 use esp_idf_svc::hal::gpio::{PinDriver, RtcInput};
 use esp_idf_svc::hal::peripherals::Peripherals;
 use esp_idf_svc::hal::reset::ResetReason;
-#[cfg(any(not(feature = "debug-gestures"), feature = "debug-button-sleep"))]
+#[cfg(not(feature = "debug-upload"))]
 use esp_idf_svc::hal::reset::WakeupReason;
+#[cfg(not(feature = "debug-upload"))]
 use esp_idf_svc::hal::sleep::{rtc::RtcWakeLevel, DeepSleep};
 use esp_idf_svc::sys::EspError;
 
-use epd::{BLACK, WHITE};
 use firmware::gesture::{Gesture, GestureClassifier, BUTTON_DEBOUNCE};
-#[cfg(feature = "debug-gestures")]
+#[cfg(feature = "debug-upload")]
 use firmware::safety::SafetyGuard;
-#[cfg(any(not(feature = "debug-button-sleep"), feature = "debug-gestures"))]
 use firmware::safety::SafetyState;
-#[cfg(not(any(feature = "debug-button-sleep", feature = "debug-gestures")))]
+#[cfg(not(feature = "debug-upload"))]
 use firmware::schedule::MANUAL_LIMIT_US;
 use firmware::schedule::{RefreshSchedule, DAILY_INTERVAL_US};
 
 const BUTTON_POLL_MS: u32 = 5;
 const BUTTON_RELEASE_TIMEOUT: Duration = Duration::from_secs(60);
-
-/// When true, runs `CLEAR_CYCLES` black/white full-screen refreshes instead of
-/// the picture, to clear ghosting left by an interrupted refresh.
-const CLEAR_TO_WHITE: bool = false;
-const CLEAR_CYCLES: usize = 3;
-/// Rest between refreshes; back-to-back Spectra 6 refreshes stress the panel.
-const CLEAR_PAUSE: Duration = Duration::from_secs(180);
-
-const PICTURE: &[u8] = include_bytes!("../assets/sunflower.bin");
-const PICTURE_WIDTH: usize = epd::WIDTH;
-const PICTURE_HEIGHT: usize = epd::HEIGHT;
-const PICTURE_LEFT: usize = (epd::WIDTH - PICTURE_WIDTH) / 2;
-const PICTURE_TOP: usize = (epd::HEIGHT - PICTURE_HEIGHT) / 2;
-
-const _: () = assert!(PICTURE.len() == PICTURE_WIDTH * PICTURE_HEIGHT / 2);
 
 const RETAINED_MAGIC: u32 = 0x484F_4632;
 
@@ -114,27 +97,6 @@ fn recover_interrupted_refresh(now_us: u64, reset_reason: ResetReason) -> bool {
     interrupted
 }
 
-fn color_at(x: usize, y: usize) -> u8 {
-    if x < PICTURE_LEFT
-        || x >= PICTURE_LEFT + PICTURE_WIDTH
-        || y < PICTURE_TOP
-        || y >= PICTURE_TOP + PICTURE_HEIGHT
-    {
-        return WHITE;
-    }
-    let i = (y - PICTURE_TOP) * PICTURE_WIDTH + (x - PICTURE_LEFT);
-    let byte = PICTURE[i / 2];
-    if i % 2 == 0 {
-        byte >> 4
-    } else {
-        byte & 0x0F
-    }
-}
-
-fn refresh_panel() -> Result<(), EspError> {
-    refresh_panel_with(color_at)
-}
-
 fn refresh_panel_with(color_at: impl Fn(usize, usize) -> u8) -> Result<(), EspError> {
     log::info!("creating panel interface; panel load switch will turn on");
     let epd = match epd::Epd::new() {
@@ -152,29 +114,13 @@ fn refresh_panel_with(color_at: impl Fn(usize, usize) -> u8) -> Result<(), EspEr
         epd.init()?;
         log::info!("panel initialization complete");
 
-        if CLEAR_TO_WHITE {
-            for cycle in 1..=CLEAR_CYCLES {
-                for (name, color) in [("black", BLACK), ("white", WHITE)] {
-                    log::info!("clear cycle {cycle}/{CLEAR_CYCLES}: {name}");
-                    epd.init()?;
-                    let start = Instant::now();
-                    epd.show(|_, _| color)?;
-                    log::info!("refresh done in {:.1} s", start.elapsed().as_secs_f32());
-                    if cycle < CLEAR_CYCLES || color != WHITE {
-                        log::info!("resting {} s", CLEAR_PAUSE.as_secs());
-                        sleep(CLEAR_PAUSE);
-                    }
-                }
-            }
-        } else {
-            log::info!("streaming image pixels");
-            let start = Instant::now();
-            epd.show(color_at)?;
-            log::info!(
-                "panel show sequence completed in {:.1} s",
-                start.elapsed().as_secs_f32()
-            );
-        }
+        log::info!("streaming image pixels");
+        let start = Instant::now();
+        epd.show(color_at)?;
+        log::info!(
+            "panel show sequence completed in {:.1} s",
+            start.elapsed().as_secs_f32()
+        );
         Ok(())
     })();
 
@@ -265,7 +211,7 @@ fn classify_gesture(button: &PinDriver<'_, RtcInput>, wake_at: Instant) -> Gestu
     }
 }
 
-#[cfg(not(feature = "debug-button-sleep"))]
+#[cfg(not(feature = "debug-upload"))]
 fn sleep_until_refresh(button: &PinDriver<'_, RtcInput>) -> ! {
     let release_started = Instant::now();
     let mut released_since = None;
@@ -313,242 +259,16 @@ fn sleep_until_refresh(button: &PinDriver<'_, RtcInput>) -> ! {
     deep_sleep.enter()
 }
 
-#[cfg(feature = "debug-button-sleep")]
-fn test_button_sleep(button: &PinDriver<'_, RtcInput>) -> Result<(), EspError> {
-    let started = Instant::now();
-    let mut released_since = None;
-    loop {
-        let now = Instant::now();
-        if button.is_low() {
-            released_since = None;
-        } else if let Some(released_at) = released_since {
-            if now.duration_since(released_at) >= BUTTON_DEBOUNCE {
-                break;
-            }
-        } else {
-            released_since = Some(now);
-        }
-        if started.elapsed() >= BUTTON_RELEASE_TIMEOUT {
-            log::error!("SW7 test: button did not release in 60 s; staying awake");
-            record_button_test_abort(ButtonTestAbort::ReleaseTimeout, None);
-            return Err(EspError::from(esp_idf_svc::sys::ESP_ERR_TIMEOUT).unwrap());
-        }
-        FreeRtos::delay_ms(BUTTON_POLL_MS);
-    }
-    // The HAL calls low-level wake AllLow; with only GPIO13 selected this is low wake.
-    let deep_sleep = DeepSleep::new()?.wakeup_on_rtc(button, RtcWakeLevel::AllLow)?;
-    set_button_test_phase(BUTTON_TEST_WAITING);
-    log::info!("SW7 test: panel off; entering deep sleep with GPIO13 wake only; press SW7 once");
-    deep_sleep.enter()
-}
-
-#[cfg(feature = "debug-button-sleep")]
-const BUTTON_TEST_UNSTARTED: u32 = 0;
-#[cfg(feature = "debug-button-sleep")]
-const BUTTON_TEST_WAITING: u32 = 1;
-#[cfg(feature = "debug-button-sleep")]
-const BUTTON_TEST_REFRESHING: u32 = 2;
-#[cfg(feature = "debug-button-sleep")]
-const BUTTON_TEST_ABORTED: u32 = 4;
-
-#[cfg(feature = "debug-button-sleep")]
-#[link_section = ".rtc.data"]
-static mut BUTTON_TEST_PHASE: u32 = BUTTON_TEST_UNSTARTED;
-
-#[cfg(feature = "debug-button-sleep")]
-#[derive(Clone, Copy, Debug)]
-enum ButtonTestAbort {
-    None,
-    PanelPowerOff,
-    Setup,
-    ReleaseTimeout,
-    UnexpectedWakeMask,
-    Refresh,
-    UnexpectedReset,
-    InterruptedRefresh,
-    InvalidPhase,
-}
-
-#[cfg(feature = "debug-button-sleep")]
-#[derive(Clone, Copy, Debug)]
-struct ButtonTestDiagnostic {
-    wake_mask: u64,
-    abort: ButtonTestAbort,
-    error_code: i32,
-}
-
-#[cfg(feature = "debug-button-sleep")]
-#[link_section = ".rtc.data"]
-static mut BUTTON_TEST_DIAGNOSTIC: ButtonTestDiagnostic = ButtonTestDiagnostic {
-    wake_mask: 0,
-    abort: ButtonTestAbort::None,
-    error_code: 0,
-};
-
-#[cfg(feature = "debug-button-sleep")]
-fn button_test_diagnostic() -> ButtonTestDiagnostic {
-    unsafe { std::ptr::addr_of!(BUTTON_TEST_DIAGNOSTIC).read_volatile() }
-}
-
-#[cfg(feature = "debug-button-sleep")]
-fn update_button_test_diagnostic(update: impl FnOnce(&mut ButtonTestDiagnostic)) {
-    unsafe {
-        let state = std::ptr::addr_of_mut!(BUTTON_TEST_DIAGNOSTIC);
-        let mut value = state.read_volatile();
-        update(&mut value);
-        state.write_volatile(value);
-    }
-}
-
-#[cfg(feature = "debug-button-sleep")]
-fn record_button_test_abort(reason: ButtonTestAbort, error: Option<EspError>) {
-    set_button_test_phase(BUTTON_TEST_ABORTED);
-    update_button_test_diagnostic(|diagnostic| {
-        diagnostic.abort = reason;
-        diagnostic.error_code = error.map_or(0, |error| error.code());
-    });
-}
-
-#[cfg(feature = "debug-button-sleep")]
-fn button_test_phase() -> u32 {
-    unsafe { std::ptr::addr_of!(BUTTON_TEST_PHASE).read_volatile() }
-}
-
-#[cfg(feature = "debug-button-sleep")]
-fn set_button_test_phase(phase: u32) {
-    unsafe {
-        std::ptr::addr_of_mut!(BUTTON_TEST_PHASE).write_volatile(phase);
-    }
-}
-
-#[cfg(feature = "debug-button-sleep")]
-fn idle_awake() -> ! {
-    loop {
-        log::info!(
-            "SW7 test idle: reset={:?}, wake={:?}, phase={}, diagnostic={:?}; no further refresh",
-            ResetReason::get(),
-            WakeupReason::get(),
-            button_test_phase(),
-            button_test_diagnostic()
-        );
-        sleep(Duration::from_secs(10));
-    }
-}
-
-#[cfg(all(feature = "debug-button-sleep", not(feature = "debug-gestures")))]
-fn main() {
-    esp_idf_svc::sys::link_patches();
-    esp_idf_svc::log::EspLogger::initialize_default();
-
-    let reset_reason = ResetReason::get();
-    let wake_reason = WakeupReason::get();
-    let wake_mask = unsafe { esp_idf_svc::sys::esp_sleep_get_ext1_wakeup_status() };
-    update_button_test_diagnostic(|diagnostic| diagnostic.wake_mask = wake_mask);
-    log::warn!(
-        "SW7 cycle test boot; reset: {reset_reason:?}, wake: {wake_reason:?}, phase: {}",
-        button_test_phase()
-    );
-
-    match button_test_phase() {
-        BUTTON_TEST_UNSTARTED => {
-            if let Err(error) = epd::Epd::disable_panel_power() {
-                log::error!("failed to disable panel power before waiting for SW7: {error:?}");
-                record_button_test_abort(ButtonTestAbort::PanelPowerOff, Some(error));
-                idle_awake();
-            }
-            log::info!("startup refresh disabled; leaving image unchanged and waiting for SW7");
-            let setup = Peripherals::take()
-                .and_then(|peripherals| PinDriver::rtc_input(peripherals.pins.gpio13, Pull::Up))
-                .and_then(|button| test_button_sleep(&button));
-            if let Err(error) = setup {
-                log::error!("SW7 sleep setup failed: {error:?}");
-                if button_test_phase() != BUTTON_TEST_ABORTED {
-                    record_button_test_abort(ButtonTestAbort::Setup, Some(error));
-                }
-            }
-        }
-        BUTTON_TEST_WAITING
-            if reset_reason == ResetReason::DeepSleep && wake_reason == WakeupReason::Button =>
-        {
-            log::warn!(
-                "SW7 diagnostic: EXT1 wake mask {wake_mask:#018x}; expected GPIO13 = 0x2000"
-            );
-            if let Err(error) = epd::Epd::disable_panel_power() {
-                log::error!("failed to cut panel power on diagnostic wake: {error:?}");
-                record_button_test_abort(ButtonTestAbort::PanelPowerOff, Some(error));
-                idle_awake();
-            }
-            if wake_mask != 1_u64 << 13 {
-                record_button_test_abort(ButtonTestAbort::UnexpectedWakeMask, None);
-                log::error!("unexpected EXT1 mask; panel refresh suppressed");
-                idle_awake();
-            }
-            match Peripherals::take()
-                .and_then(|peripherals| PinDriver::rtc_input(peripherals.pins.gpio13, Pull::Up))
-            {
-                Ok(button) => {
-                    log::info!(
-                        "confirmed GPIO13 wake; current SW7 level={}",
-                        button.is_high()
-                    );
-                    set_button_test_phase(BUTTON_TEST_REFRESHING);
-                    match refresh_panel() {
-                        Ok(()) => {
-                            log::info!("SW7 wake refresh completed; waiting for release before sleeping again");
-                            if let Err(error) = test_button_sleep(&button) {
-                                if button_test_phase() != BUTTON_TEST_ABORTED {
-                                    record_button_test_abort(ButtonTestAbort::Setup, Some(error));
-                                }
-                                log::error!("SW7 sleep setup failed after refresh: {error:?}; staying awake");
-                            }
-                        }
-                        Err(error) => {
-                            record_button_test_abort(ButtonTestAbort::Refresh, Some(error));
-                            log::error!("SW7 wake refresh failed: {error:?}; no retry");
-                        }
-                    }
-                }
-                Err(error) => {
-                    record_button_test_abort(ButtonTestAbort::Setup, Some(error));
-                    log::error!("failed to configure GPIO13 after SW7 wake: {error:?}");
-                }
-            }
-        }
-        BUTTON_TEST_WAITING => {
-            record_button_test_abort(ButtonTestAbort::UnexpectedReset, None);
-            log::error!(
-                "unexpected reset/wake while waiting for SW7 ({reset_reason:?}/{wake_reason:?}); \
-                 aborting without refreshing"
-            );
-        }
-        BUTTON_TEST_REFRESHING => {
-            record_button_test_abort(ButtonTestAbort::InterruptedRefresh, None);
-            log::error!(
-                "reset interrupted the SW7 wake refresh ({reset_reason:?}/{wake_reason:?}); \
-                 aborting without automatic retry"
-            );
-        }
-        BUTTON_TEST_ABORTED => log::error!("SW7 cycle test aborted; no automatic refresh"),
-        phase => {
-            record_button_test_abort(ButtonTestAbort::InvalidPhase, None);
-            log::error!("invalid SW7 test phase {phase}; aborting without refresh");
-        }
-    }
-
-    idle_awake()
-}
-
-#[cfg(feature = "debug-gestures")]
+#[cfg(feature = "debug-upload")]
 const MOCK_REFRESH_INTERVAL_US: u64 = 120 * 1_000_000;
-#[cfg(feature = "debug-gestures")]
+#[cfg(feature = "debug-upload")]
 const MOCK_MANUAL_LIMIT_US: u64 = 30 * 1_000_000;
 
-#[cfg(feature = "debug-gestures")]
+#[cfg(feature = "debug-upload")]
 fn mock_refresh(
     schedule: &mut RefreshSchedule,
     safety: &mut SafetyGuard<safety_nvs::NvsSafetyStore>,
     manual: bool,
-    inject_interruption: &mut bool,
 ) {
     if safety.state() != SafetyState::Clean {
         log::warn!("mock Refresh: BLOCKED by persistent safety latch");
@@ -561,16 +281,6 @@ fn mock_refresh(
         safety_storage_fault(error);
     }
     log::info!("mock safety: WORKING marker committed to NVS before work");
-    if *inject_interruption {
-        *inject_interruption = false;
-        log::error!("mock fault injection: interrupted work; reopening committed safety record without resetting USB");
-        if let Err(error) = safety.recover_interrupted_work() {
-            safety_storage_fault(error);
-        }
-        schedule.defer_retry(rtc_time_us(), MOCK_REFRESH_INTERVAL_US);
-        log::warn!("mock safety: {:?}; refresh not completed; hold SW7 for 5 s to acknowledge with SIMULATED safe recovery voltage", safety.state());
-        return;
-    }
     let mut storage = match frame_flash::FlashFrames::open() {
         Ok(storage) => storage,
         Err(error) => safety_storage_fault(error),
@@ -605,54 +315,7 @@ fn safety_storage_fault(error: impl std::fmt::Debug) -> ! {
     }
 }
 
-#[cfg(feature = "debug-frame-storage")]
-fn test_frame_storage(safety: &mut SafetyGuard<safety_nvs::NvsSafetyStore>) {
-    if safety.state() != SafetyState::Clean {
-        log::warn!("frame storage test BLOCKED by safety latch; hold to acknowledge, then reflash this feature");
-        return;
-    }
-    let mut storage = match frame_flash::FlashFrames::open() {
-        Ok(storage) => storage,
-        Err(error) => safety_storage_fault(error),
-    };
-    let before = match storage.load() {
-        Ok(scan) => scan,
-        Err(error) => safety_storage_fault(error),
-    };
-    log::warn!("frame storage test: committing bundled native portrait fixture to inactive slot; old={:?}; panel OFF", before.current);
-    if let Err(error) = safety.begin_work() {
-        safety_storage_fault(error);
-    }
-    let committed = match firmware::frame::commit(
-        &mut storage,
-        PICTURE,
-        firmware::frame::Metadata::default(),
-    ) {
-        Ok(record) => record,
-        Err(error) => safety_storage_fault(error),
-    };
-    let after = match storage.load() {
-        Ok(scan) => scan,
-        Err(error) => safety_storage_fault(error),
-    };
-    if after.current != Some(committed) {
-        safety_storage_fault("frame commit/reload mismatch");
-    }
-    match storage.map(committed) {
-        Ok(mapped) => {
-            if mapped.bytes() != PICTURE {
-                safety_storage_fault("mapped frame differs from fixture");
-            }
-        }
-        Err(error) => safety_storage_fault(error),
-    }
-    if let Err(error) = safety.finish_work() {
-        safety_storage_fault(error);
-    }
-    log::info!("frame storage test: PASS; committed/reloaded/mapped 960000 bytes; {committed:?}; NVS clean; panel OFF");
-}
-
-#[cfg(feature = "debug-gestures")]
+#[cfg(feature = "debug-upload")]
 fn main() {
     esp_idf_svc::sys::link_patches();
     esp_idf_svc::log::EspLogger::initialize_default();
@@ -666,8 +329,6 @@ fn main() {
         Ok(safety) => safety,
         Err(error) => safety_storage_fault(error),
     };
-    let mut inject_interruption = cfg!(feature = "debug-interrupted-work");
-    #[cfg(feature = "debug-upload")]
     let mut upload_wifi = {
         if let Err(error) = psram::verify() {
             log::error!("PSRAM verification failed: {error:?}");
@@ -708,10 +369,10 @@ fn main() {
             }
         }
     };
-    #[cfg(feature = "debug-frame-storage")]
-    test_frame_storage(&mut safety);
 
-    log::warn!("SW7 gesture test: MOCK deep sleep; USB stays connected; panel OFF, Wi-Fi OFF");
+    log::warn!(
+        "upload development mode: MOCK deep sleep; USB stays connected; panel OFF, Wi-Fi OFF"
+    );
     #[cfg(feature = "debug-upload-display")]
     log::warn!("display test ENABLED: successful upload/save triggers REAL panel refresh; timer/manual refresh remain mocked; battery guard SIMULATED; use bench power");
     log::warn!("mock safety: NVS namespace=hof_mock, state={:?}; acknowledgement uses SIMULATED safe recovery voltage, never a battery measurement", safety.state());
@@ -725,7 +386,7 @@ fn main() {
         let now_us = rtc_time_us();
         if schedule.due(now_us, MOCK_REFRESH_INTERVAL_US) {
             log::info!("mock Boot: TIMER wake; no button gesture required");
-            mock_refresh(&mut schedule, &mut safety, false, &mut inject_interruption);
+            mock_refresh(&mut schedule, &mut safety, false);
             continue;
         }
 
@@ -762,96 +423,89 @@ fn main() {
                 Gesture::ManualRefresh
                     if schedule.manual_allowed(rtc_time_us(), MOCK_MANUAL_LIMIT_US) =>
                 {
-                    mock_refresh(&mut schedule, &mut safety, true, &mut inject_interruption);
+                    mock_refresh(&mut schedule, &mut safety, true);
                 }
                 Gesture::ManualRefresh => {
                     log::info!("mock ManualRefresh: RATE LIMITED; daily deadline unchanged={deadline_before} us");
                 }
                 Gesture::Upload => {
-                    #[cfg(feature = "debug-upload")]
-                    {
-                        if let Err(error) = safety.begin_work() {
+                    if let Err(error) = safety.begin_work() {
+                        safety_storage_fault(error);
+                    }
+                    let received = match upload_wifi::run(&mut upload_wifi, wake_at) {
+                        Ok(received) => received,
+                        Err(error) => {
+                            log::error!("UploadWindow failed: {error:?}");
+                            if let Err(latch_error) = safety.latch() {
+                                safety_storage_fault(latch_error);
+                            }
                             safety_storage_fault(error);
                         }
-                        let received = match upload_wifi::run(&mut upload_wifi, wake_at) {
-                            Ok(received) => received,
+                    };
+                    #[cfg(feature = "debug-upload-display")]
+                    let mut displayed = false;
+                    if let Some(mut received) = received {
+                        let saved = image_decode::save(
+                            &received.buffer.bytes_mut()[..received.len],
+                            received.metadata,
+                            wake_at + firmware::upload::AWAKE_TIMEOUT,
+                        );
+                        drop(received);
+                        let saved = match saved {
+                            Ok(()) => true,
                             Err(error) => {
-                                log::error!("UploadWindow failed: {error:?}");
+                                match error {
+                                    image_decode::PipelineError::Rejected(error) => {
+                                        log::warn!("Upload rejected during decode: {error}; saved frame unchanged; panel OFF");
+                                    }
+                                    image_decode::PipelineError::Fault(error) => {
+                                        log::error!("Upload pipeline fault: {error}; panel OFF");
+                                        if let Err(latch_error) = safety.latch() {
+                                            safety_storage_fault(latch_error);
+                                        }
+                                        safety_storage_fault(error);
+                                    }
+                                }
+                                false
+                            }
+                        };
+                        #[cfg(not(feature = "debug-upload-display"))]
+                        let _ = saved;
+                        #[cfg(feature = "debug-upload-display")]
+                        if saved {
+                            if wake_at.elapsed() >= firmware::upload::AWAKE_TIMEOUT {
+                                log::error!("display test: awake deadline expired before refresh; saved frame retained; panel OFF");
+                                if let Err(latch_error) = safety.latch() {
+                                    safety_storage_fault(latch_error);
+                                }
+                                safety_storage_fault("display awake deadline expired");
+                            }
+                            log::info!("display test: verified save; Wi-Fi OFF; starting REAL panel refresh; USB stays connected");
+                            if let Err(error) = refresh_saved_frame() {
+                                log::error!("display test: refresh failed: {error:?}; saved frame retained; no automatic retry");
+                                if let Err(power_error) = epd::Epd::disable_panel_power() {
+                                    log::error!("display test: emergency power cutoff failed: {power_error:?}");
+                                }
                                 if let Err(latch_error) = safety.latch() {
                                     safety_storage_fault(latch_error);
                                 }
                                 safety_storage_fault(error);
                             }
-                        };
-                        #[cfg(feature = "debug-upload-display")]
-                        let mut displayed = false;
-                        if let Some(mut received) = received {
-                            let saved = image_decode::save(
-                                &received.buffer.bytes_mut()[..received.len],
-                                received.metadata,
-                                wake_at + firmware::upload::AWAKE_TIMEOUT,
-                            );
-                            drop(received);
-                            let saved = match saved {
-                                Ok(()) => true,
-                                Err(error) => {
-                                    match error {
-                                        image_decode::PipelineError::Rejected(error) => {
-                                            log::warn!("Upload rejected during decode: {error}; saved frame unchanged; panel OFF");
-                                        }
-                                        image_decode::PipelineError::Fault(error) => {
-                                            log::error!(
-                                                "Upload pipeline fault: {error}; panel OFF"
-                                            );
-                                            if let Err(latch_error) = safety.latch() {
-                                                safety_storage_fault(latch_error);
-                                            }
-                                            safety_storage_fault(error);
-                                        }
-                                    }
-                                    false
-                                }
-                            };
-                            #[cfg(not(feature = "debug-upload-display"))]
-                            let _ = saved;
-                            #[cfg(feature = "debug-upload-display")]
-                            if saved {
-                                if wake_at.elapsed() >= firmware::upload::AWAKE_TIMEOUT {
-                                    log::error!("display test: awake deadline expired before refresh; saved frame retained; panel OFF");
-                                    if let Err(latch_error) = safety.latch() {
-                                        safety_storage_fault(latch_error);
-                                    }
-                                    safety_storage_fault("display awake deadline expired");
-                                }
-                                log::info!("display test: verified save; Wi-Fi OFF; starting REAL panel refresh; USB stays connected");
-                                if let Err(error) = refresh_saved_frame() {
-                                    log::error!("display test: refresh failed: {error:?}; saved frame retained; no automatic retry");
-                                    if let Err(power_error) = epd::Epd::disable_panel_power() {
-                                        log::error!("display test: emergency power cutoff failed: {power_error:?}");
-                                    }
-                                    if let Err(latch_error) = safety.latch() {
-                                        safety_storage_fault(latch_error);
-                                    }
-                                    safety_storage_fault(error);
-                                }
-                                displayed = true;
-                            }
+                            displayed = true;
                         }
-                        if let Err(error) = safety.finish_work() {
-                            safety_storage_fault(error);
-                        }
-                        #[cfg(feature = "debug-upload-display")]
-                        if displayed {
-                            schedule.refresh_succeeded(rtc_time_us(), false);
-                            log::info!("display test: SUCCESS; panel OFF; safety CLEAN; daily deadline restarted; USB connected");
-                        }
-                        log::info!(
-                            "mock Upload: processing ended; panel OFF; daily deadline={} us",
-                            schedule.deadline_us(MOCK_REFRESH_INTERVAL_US)
-                        );
                     }
-                    #[cfg(not(feature = "debug-upload"))]
-                    log::info!("mock Upload: no image received; daily deadline unchanged={deadline_before} us");
+                    if let Err(error) = safety.finish_work() {
+                        safety_storage_fault(error);
+                    }
+                    #[cfg(feature = "debug-upload-display")]
+                    if displayed {
+                        schedule.refresh_succeeded(rtc_time_us(), false);
+                        log::info!("display test: SUCCESS; panel OFF; safety CLEAN; daily deadline restarted; USB connected");
+                    }
+                    log::info!(
+                        "mock Upload: processing ended; panel OFF; daily deadline={} us",
+                        schedule.deadline_us(MOCK_REFRESH_INTERVAL_US)
+                    );
                 }
                 Gesture::Sleep => {
                     log::info!(
@@ -880,7 +534,7 @@ fn main() {
     }
 }
 
-#[cfg(not(any(feature = "debug-button-sleep", feature = "debug-gestures")))]
+#[cfg(not(feature = "debug-upload"))]
 fn main() {
     let wake_at = Instant::now();
 

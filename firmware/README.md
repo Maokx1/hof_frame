@@ -16,100 +16,21 @@ Button polling uses a scheduler-yielding FreeRTOS delay and 50 ms debounce.
 Short `std::thread::sleep` calls can busy-wait on ESP-IDF and starve the idle
 task; this caused watchdog warnings in the earlier counter.
 
-## Current verified mode: repeating SW7 sleep/wake
+## Development modes (mock sleep, continuous USB logging)
 
-```sh
-cd firmware
-cargo run --release --features debug-button-sleep
-```
+Supported modes are `debug-upload` (receive, decode, and save),
+`debug-upload-display` (also refresh the panel), and `debug-battery-preview`
+(display with a simulated 100% label). All stay awake to preserve USB logs.
+Hold the waking SW7 press for five seconds to open the upload window.
+Triple presses and the 120-second timer exercise simulated refresh scheduling
+only; the manual test limit is 30 seconds. Only successful refresh completion
+advances the daily deadline. Production intervals remain 24 hours and one hour.
 
-This real-sleep baseline behaves as follows (the latest bench capture used
-the mock-sleep mode below):
+Retired button-only, gesture-only, interruption-injection, fixture-storage,
+and black/white clearing diagnostics are no longer build features. Automated
+gesture, scheduler, safety, storage, decoder, and overlay tests remain.
 
-1. Startup leaves the displayed image unchanged and turns panel power off.
-2. Wait for SW7 to remain released for 50 ms, then enter GPIO13-only deep sleep.
-3. A SW7 press wakes the board. Refresh only when reset is `DeepSleep`, wake
-   cause is `Button`, and the EXT1 mask is exactly GPIO13 (`0x2000`).
-4. Refresh the bundled full-frame
-   [sunflower image](assets/sunflower.bin) (1200 x 1600, 4 bpp).
-5. Wait for panel completion, power it off, wait for button release, and sleep
-   again. There is no timer, gesture classification, or hourly limit in this mode.
-
-Holding SW7 does not trigger repeated refreshes. If it does not release within
-60 seconds, or refresh/setup fails, log the error and stay awake without retry.
-Unexpected wake causes also abort without refreshing. The test phase lives in
-RTC memory: it survives deep sleep but is **not a durable reset/recovery latch**.
-If another reset reinitializes it, startup waits for SW7 rather than refreshing.
-
-Abort idle messages now repeat the recorded failure reason, ESP error code,
-and the EXT1 mask captured at boot, rather than re-reading a wake mask that
-sleep setup may already have cleared. These diagnostics share the RTC-memory
-limitations above; they do not establish what happened before a power loss or
-reset that reinitializes RTC data.
-
-Allow the panel to rest between refreshes. The
-[panel driver](src/epd.rs) retains its working initialization, pixel streaming,
-BUSY polling, waveform, and power-off sequence.
-
-## Gesture and scheduling test (mock sleep, continuous USB logging)
-
-```sh
-cd firmware
-cargo run --release --features debug-gestures
-```
-
-This mode uses the normal-path [gesture classifier](src/gesture.rs) but
-**never enters deep sleep**. USB and the monitor stay connected throughout
-repeated tests. The panel load switch stays off; refresh and upload actions
-are mocked. `debug-gestures` is independent of `debug-button-sleep` and takes
-precedence if both features are enabled.
-
-Wait for `mock DeepSleep: READY`, then perform one gesture:
-
-- One short SW7 click: `Sleep`.
-- Three presses within three seconds, including the waking press:
-  `ManualRefresh`, followed by a simulated refresh if allowed.
-- Hold the waking press for five seconds: `Upload` (classification only).
-- Two presses, a late third press, or holding only a later press: `Sleep`.
-
-Scheduling uses the same [scheduler](src/schedule.rs) as the normal path,
-with **test-only** intervals of 120 seconds for daily refresh and 30 seconds
-for manual rate limiting. Normal firmware retains 24 hours and one hour.
-Simulated refreshes take one second; only successful completion restarts the
-daily deadline. Startup arms the initial timer without refreshing.
-
-Acceptance sequence (keep the monitor open throughout):
-
-1. Triple-press: expect `mock Refresh: manual started`, then `SUCCESS` and
-   a new 120-second deadline.
-2. Triple-press again within 30 seconds of completion: expect `RATE LIMITED`
-   and the same absolute daily deadline.
-3. Short-click or hold for upload: expect `daily deadline unchanged`.
-   Upload is still a placeholder, not a successful image receipt or refresh.
-4. After 30 seconds, triple-press again: expect an allowed simulated refresh.
-5. Leave the board untouched for 120 seconds after the last completion:
-   expect `TIMER wake`, a simulated refresh, and a fresh deadline.
-
-Status logs every five seconds show remaining daily time and whether manual
-refresh is allowed. Daily timer checks continue even while waiting for a held
-button to release. If a deadline expires during gesture classification, it is
-serviced after the gesture unless a successful manual refresh replaces it.
-Automatic refreshes do not reset the manual-refresh limit.
-
-Each result is logged immediately with elapsed time. The test then waits for
-SW7 to be released for 50 ms and prints `READY` again, with no reporting delay,
-reset, or monitor reconnection. Holding SW7 after a result cannot start another
-gesture: release handling waits indefinitely and reports its status every five
-seconds. This intentionally mocks production's 60-second stuck-button sleep
-policy rather than disconnecting the test monitor.
-
-The gesture timer starts when polling detects the first active-low SW7 press,
-which simulates the waking press. Polling yields to FreeRTOS between samples.
-This tests physical gestures without boot latency; actual deep-sleep wake,
-RTC retention across resets, boot-time edges, and sleep current still need separate hardware
-checks in the real sleep modes.
-
-## Persistent recovery test (mock sleep, real NVS writes)
+## Persistent recovery (real NVS writes)
 
 The normal and mocked paths now use the shared [safety guard](src/safety.rs)
 and [NVS adapter](src/safety_nvs.rs). A single versioned byte represents
@@ -124,39 +45,13 @@ erasing full/incompatible storage. Missing metadata initializes a clean record
 on first use; missing data after an external erase cannot be distinguished
 from first use. ESP-IDF NVS commits are used, but power-loss/low-voltage write
 guarantees still require hardware testing. No battery voltage is measured yet.
-The marker is currently wired to refresh only; transfer/frame-write paths do
-not exist yet.
+The marker covers upload, decoding, frame writes, and any physical refresh.
 
 Mock and normal safety records are isolated in `hof_mock` and `hof_safety`
-namespaces. The real-sleep `debug-button-sleep` baseline remains RTC-only
-and does not use this persistent guard.
-
-To inject one interrupted simulated refresh per boot:
-
-```sh
-cd firmware
-cargo run --release --features debug-interrupted-work
-```
-
-1. Wait for `READY`, then triple-press. Expect `WORKING marker committed`,
-   an injected interruption, and state `Latched`. The test rereads real NVS
-   to simulate reboot recovery **without resetting or disconnecting USB**.
-2. Triple-press again: expect `BLOCKED by persistent safety latch`.
-   Short clicks do not clear it either.
-3. Leave it latched until the 120-second timer: expect another blocked
-   refresh and a new recheck interval, not a successful refresh.
-4. Hold the waking press for five seconds: expect acknowledgement committed
-   and state `CLEAN`. This test explicitly simulates safe recovery voltage;
-   it is not battery qualification and starts no upload or refresh.
-5. Release, then triple-press: expect a successful simulated refresh. The
-   injection was consumed, so later cycles run normally until reboot.
-
-For a separate persistence check, leave the test latched and restart/reflash
-with `debug-gestures` (without the injection feature). It should load
-`Latched`; only the mock qualified hold clears it. A deliberate real restart
-or power cycle may disconnect USB; ordinary mock cycles never do.
-Fault injection resets once per actual boot, so reflashing the injection
-build rearms it.
+namespaces. A latched mock record is acknowledged by a five-second hold
+using explicitly simulated safe recovery voltage, without upload or refresh.
+Release and hold again to open Wi-Fi. Fault injection remains covered by
+automated safety tests, not a separate device feature.
 
 **Normal firmware fails closed:** it checks persistent metadata before panel
 work, commits the marker before powering the panel, and latches on refresh
@@ -224,37 +119,6 @@ read-only rather than allocating a 960,000-byte internal-RAM framebuffer.
 Real flash operations yield periodically to FreeRTOS. CRCs detect corruption;
 actual power-cut durability and physical rotation still need bench testing.
 
-### Storage bring-up with mocked sleep and panel
-
-```sh
-cd firmware
-cargo run --release --features debug-frame-storage
-```
-
-The Cargo runner now passes `--flash-size 16mb --partition-table partitions.csv`.
-This installs the new layout without an erase-all command, keeping NVS/PHY
-offsets unchanged. The old factory partition is reduced to make room for data:
-use only on this confirmed 16 MiB development board with the current small app,
-and back up any pre-existing data in the newly reserved region first. Never
-use an old partition table/runner with firmware that writes these frame slots.
-This layout has one factory app and no OTA slots.
-
-At boot this feature loads existing slots, then commits the bundled sunflower
-fixture once to the inactive slot under the mock NVS safety guard. It reloads,
-maps, and byte-compares the stored frame with the fixture. Expect
-`frame storage test: PASS; committed/reloaded/mapped 960000 bytes`, followed by
-the usual mock gesture/scheduling logs. Flashing this feature again alternates
-slots and increments generation. It writes real flash but never refreshes the
-panel, starts Wi-Fi, or enters deep sleep. Do not combine it with interruption
-injection for the initial storage check.
-
-If mock safety is latched, the storage test logs `BLOCKED`; acknowledge with
-a five-second hold, then reflash this feature to rerun it. To verify loading
-without another write, flash `debug-gestures` and triple-press or wait for its
-timer: simulated refresh now validates and reports the selected stored frame.
-The real-sleep `debug-button-sleep` baseline still renders the bundled fixture;
-the normal path now renders validated storage or plain white fallback.
-
 ## PSRAM and Wi-Fi image-save test (mock sleep and panel)
 
 ### Real display after upload (mock sleep)
@@ -316,7 +180,6 @@ the smooth outline edges on the six-color panel, which has no grayscale.
 The 5,760-byte overlay is prepared before powering the panel on and composited
 over read-only frame pixels; it is never baked into the stored photo.
 Overlay construction errors are logged and prevent panel power-on.
-The baseline `debug-button-sleep` sunflower diagnostic is unchanged.
 
 Host tests cover all eight corner/orientation combinations, exact box
 margins/border, 24-pixel question-mark height, and fitting all `0%` through
@@ -339,9 +202,7 @@ pyftsubset /usr/share/fonts/truetype/dejavu/DejaVuSans.ttf \
 
 `debug-upload` extends mock gestures with a real WPA2 hotspot, HTTP
 receiver, bounded row decoder, dithering, and atomic frame save.
-Normal firmware and `debug-gestures` alone still have no upload
-window. Do not combine this mode with interruption injection for initial
-receiver testing.
+Normal firmware still has no upload window.
 
 Choose an 8-63 character printable ASCII hotspot password locally, supply it through
 `HOF_WIFI_PASSWORD` at build time, and keep it out of git and shared logs.
@@ -557,36 +418,19 @@ No commits were created.
   power-cut atomicity or physical panel rendering. USB remained connected
   during the application test, with panel and Wi-Fi off.
 
-### Next steps, in order
+### Next steps
 
-1. Keep the repeating cycle as the known-good baseline. Check held-button
-   release behavior and a longer untouched sleep interval without causing
-   back-to-back panel refreshes.
-2. Reintroduce and test gestures in the normal path: waking press counts as
-   press one, three presses within three seconds request manual refresh,
-   an uninterrupted five-second waking hold requests upload, and incomplete
-   gestures return to sleep. Add deterministic timing/debounce tests before
-   hardware testing; upload is currently only a log placeholder.
-3. Integrate the daily RTC deadline and one-hour manual-refresh limit.
-   Test with a deliberately shortened development interval, then restore
-   24 hours. Advance the deadline only after successful refresh. Verify that
-   early button wakes do not accidentally reset the daily deadline.
-4. Verify the implemented NVS work marker and latch in mock mode, then verify
-   brownout, ordinary reset, and power-loss behavior explicitly. Implement
-   calibrated battery recovery before enabling normal-path acknowledgement.
-5. Continue the remaining target work: persistent frame storage and white
-   default, battery ADC/pin verification and low-battery latch, Wi-Fi upload,
-   decoding/dithering, and atomic frame replacement. Measure whole-board
-   sleep current and supply behavior before claiming battery readiness.
+Qualify repeated uploads, malformed/timed-out transfers, reset/power-cut
+recovery, and panel cleanup. Implement persistent upload-error status and
+calibrated battery measurement/recovery before battery operation. Keep USB-
+preserving debug modes for development; qualify real sleep separately.
 
 ### Cleanup completed
 
-Removed the GPIO mapping probe, standalone click counter, timer-only test,
-display-only awake mode, no-panel probe, and waveform-skipping probe.
-Replaced the accumulated VS Code debug tasks with one repeating-cycle task.
-At handoff only `debug-button-sleep` remained as a bring-up feature.
-The subsequent implementation added `debug-gestures` for no-panel gesture
-qualification and repeated abort diagnostics.
+Removed retired hardware diagnostics, fault-injection entry points, bundled
+sunflower assets, black/white clearing cycles, and the unused bitmap-font
+dependency. The three upload modes and all automated regression tests remain.
+Historical results above describe retired modes, not current build commands.
 
 ## Normal path: implemented but not hardware-qualified
 
@@ -649,11 +493,9 @@ This is not battery-ready firmware.
 ```sh
 cd firmware
 cargo build --release
-cargo build --release --features debug-button-sleep
-cargo build --release --features debug-gestures
-cargo build --release --features debug-interrupted-work
-cargo build --release --features debug-frame-storage
 cargo build --release --features debug-upload
+cargo build --release --features debug-upload-display
+cargo build --release --features debug-battery-preview
 ```
 
 The first build downloads and builds ESP-IDF v5.5.3 into `.embuild/`

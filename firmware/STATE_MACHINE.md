@@ -18,10 +18,11 @@ implemented behavior and build instructions.
   gesture timing and debounce classifier has deterministic unit tests in
   `src/gesture.rs`; those tests do not qualify hardware timing. A failed
   scheduled refresh is retried after 24 hours to avoid a rapid retry loop.
-- The `debug-gestures` feature exercises that same classifier with mocked
-  deep sleep and mocked refresh/upload actions. It stays awake with continuous
+- The `debug-upload` feature exercises that same classifier with mocked
+  deep sleep and simulated timer/manual refreshes. It stays awake with continuous
   USB logging, treats the first SW7 press as wake, reports the result, and
-  rearms after debounced release. It never powers the panel or starts Wi-Fi.
+  rearms after debounced release. A five-second hold opens the real upload
+  window; panel work requires the explicit display feature.
   Shared scheduling logic in [schedule.rs](src/schedule.rs) is exercised with
   a 120-second daily interval, a 30-second manual limit, and one-second
   simulated successful refreshes. No-work wakes preserve the daily deadline;
@@ -29,9 +30,8 @@ implemented behavior and build instructions.
   builds retain 24-hour/one-hour intervals and keep scheduling state in RTC
   memory. Both paths advance last-success timing only on refresh completion.
   Actual sleep/wake and boot latency are not tested in this mode.
-  The real-sleep `debug-button-sleep` mode repeats recorded abort reasons and
-  boot-time EXT1 masks while aborted; RTC diagnostics are not persistent
-  safety metadata.
+  Retired button-only, gesture-only, fault-injection, and fixture-storage
+  diagnostics have been removed; automated regression tests remain.
 - The normal path commits an NVS work marker before refreshing and clears it
   after successful refresh/panel shutdown. Brownout, unfinished work, unknown
   metadata, or refresh failure latch work off; manual refresh cannot override
@@ -39,16 +39,15 @@ implemented behavior and build instructions.
   RTC cooldown remains supplementary scheduling metadata, not the safety latch.
   Normal acknowledgement is disabled until calibrated battery recovery checks
   exist. Mock mode has a separate safety namespace, explicitly simulated safe
-  recovery voltage, and `debug-interrupted-work` injection that rereads the
-  committed marker without a real reset or USB disconnect. NVS power-loss
+  recovery voltage. Automated safety tests cover injected interruptions
+  without a separate device feature. NVS power-loss
   guarantees still need hardware qualification; missing metadata initializes
   as first use and external erasure cannot be distinguished from first use.
 - Packed-frame storage uses two 1 MiB slots in the 2 MiB `frames` partition,
   with size/palette/header/payload validation, CRC32s, generation selection,
   and header/tag-last publication after candidate readback. Normal rendering
   maps validated flash or generates white; invalid slots are logged. The
-  `debug-frame-storage` feature commits/reloads/maps a full bundled fixture
-  under the mock work marker without panel refresh or deep sleep. Frame format,
+  upload pipeline commits and reloads candidates under the work marker. Frame format,
   rotation mapping, and torn-write behavior have host tests, not yet hardware
   acceptance. Orientation/corner metadata drives the render-time status box.
 - `debug-upload` adds a real one-client WPA2 AP and local upload page to mock
@@ -97,7 +96,7 @@ implemented behavior and build instructions.
   Ordered black/white coverage represents antialiased outline edges without
   unsupported grayscale colors. Saved frame pixels are untouched. Both
   normal saved/default rendering and the upload-display test use this overlay;
-  baseline sunflower diagnostics stay unchanged. Battery measurement is not
+  retired fixture-only diagnostics have been removed. Battery measurement is not
   qualified, so all current renders show `?`. Physical preview is pending.
   The label now uses a leading 17 x 11 filled battery icon and `?%` when unknown,
   or simulated `100%` with `debug-battery-preview`. Text scales down from a
