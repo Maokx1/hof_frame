@@ -238,6 +238,10 @@ pub fn run(
                         "text/html; charset=utf-8",
                         &PAGE
                             .replace("/* __STYLES__ */", include_str!("../assets/upload.css"))
+                            .replace(
+                                "/* __TRANSLATIONS__ */",
+                                include_str!("../assets/upload-i18n.js"),
+                            )
                             .replace("/* __SCRIPT__ */", include_str!("../assets/upload.js"))
                             .replace("__SECONDS__", &remaining.to_string())
                             .replace(

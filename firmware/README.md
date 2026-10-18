@@ -260,11 +260,16 @@ pyftsubset /usr/share/fonts/truetype/dejavu/DejaVuSans.ttf \
 ## Validation and acceptance
 
 The upload page is Polish-first, with a self-contained dark/amber layout.
-It needs no internet connection, CDN, or remote fonts. English UI switching
-is deferred; raw device errors remain available under “Szczegóły techniczne”
-while user-facing progress, retry, and connection-loss guidance is in Polish.
+It needs no internet connection, CDN, or remote fonts. The language selector at
+the top switches between Polish (the default on each page load) and English
+without reloading, restarting the countdown, clearing the selected photo, or
+interrupting an upload. Team members are called “Bursztynek” in Polish and
+“Amber” in English. Raw device errors remain verbatim under
+“Szczegóły techniczne” / “Technical details”.
 Edit markup in [upload.html](assets/upload.html), styles in
 [upload.css](assets/upload.css), and behavior in [upload.js](assets/upload.js).
+Translations and live text bindings are in
+[upload-i18n.js](assets/upload-i18n.js); Polish source messages are the keys.
 Firmware embeds the CSS and JavaScript into the HTML template when serving it,
 so the browser still receives one self-contained page, with no extra asset
 requests. The template also supplies the current timeout values.

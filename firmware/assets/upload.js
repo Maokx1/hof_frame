@@ -1,6 +1,6 @@
 const status = document.getElementById('status'), form = document.getElementById('form');
 document.getElementById('file').addEventListener('change', event => {
-  document.getElementById('filename').textContent = event.target.files[0]?.name || 'Nie wybrano pliku';
+  bindText(document.getElementById('filename'), event.target.files[0]?.name || t('Nie wybrano pliku'));
 });
 const progress = document.getElementById('progress'), stages = [...document.querySelectorAll('#stages li')];
 let activeStage = 0;
@@ -12,10 +12,12 @@ function showProgress(done, active, detail = '') {
   document.getElementById('sequence').hidden = false;
   activeStage = active;
   progress.setAttribute('aria-valuenow', done);
-  progress.setAttribute('aria-valuetext', `Ukończone etapy: ${done} z 4${detail ? `. ${detail}` : ''}`);
+  bindText(progress, t('Ukończone etapy: {done} z 4{detail}', {
+    done, detail: () => detail ? `. ${resolveText(detail)}` : '',
+  }), 'aria-valuetext');
   stages.forEach((stage, index) => {
     stage.className = index < done ? 'done' : index === active ? 'active' : '';
-    stage.querySelector('span').textContent = index < done ? 'Ukończono' : index === active ? detail : 'Oczekiwanie';
+    bindText(stage.querySelector('span'), index < done ? t('Ukończono') : index === active ? detail : t('Oczekiwanie'));
     if (index === active) stage.setAttribute('aria-current', 'step');
     else stage.removeAttribute('aria-current');
   });
@@ -23,7 +25,7 @@ function showProgress(done, active, detail = '') {
 function failProgress() {
   if (activeStage !== null) {
     stages[activeStage].className = 'failed';
-    stages[activeStage].querySelector('span').textContent = 'Nie ukończono';
+    bindText(stages[activeStage].querySelector('span'), t('Nie ukończono'));
     stages[activeStage].removeAttribute('aria-current');
   }
 }
@@ -36,37 +38,37 @@ const sessionHelp = document.getElementById('session-help');
 let announced = new Set();
 function sessionState(label, value, help) {
   clearInterval(countdown);
-  sessionLabel.textContent = label;
-  sessionTime.textContent = value;
-  sessionHelp.textContent = help;
+  bindText(sessionLabel, label);
+  bindText(sessionTime, value);
+  bindText(sessionHelp, help);
   document.querySelector('.session-bar').classList.remove('urgent');
 }
 function shutdownCountdown() {
-  sessionState('Hotspot zamknie się za', '0:06', 'Zdjęcie jest gotowe. Możesz wrócić do swojej sieci Wi-Fi.');
+  sessionState(t('Hotspot zamknie się za'), '0:06', t('Zdjęcie jest gotowe. Możesz wrócić do swojej sieci Wi-Fi.'));
   const closes = performance.now() + 6000;
   const tick = () => {
     const seconds = Math.max(0, Math.ceil((closes - performance.now()) / 1000));
-    sessionTime.textContent = `0:${String(seconds).padStart(2, '0')}`;
-    if (!seconds) sessionState('Hotspot jest zamykany', 'Koniec', 'Możesz wrócić do swojej sieci Wi-Fi.');
+    bindText(sessionTime, `0:${String(seconds).padStart(2, '0')}`);
+    if (!seconds) sessionState(t('Hotspot jest zamykany'), t('Koniec'), t('Możesz wrócić do swojej sieci Wi-Fi.'));
   };
   countdown = setInterval(tick, 250);
   tick();
 }
 function startCountdown(message = '') {
-  sessionState('Czas na wysłanie zdjęcia', '', 'Po upływie czasu hotspot zostanie zamknięty.');
-  status.textContent = message;
+  sessionState(t('Czas na wysłanie zdjęcia'), '', t('Po upływie czasu hotspot zostanie zamknięty.'));
+  bindText(status, message);
   const tick = () => {
     const seconds = Math.max(0, Math.ceil((deadline - performance.now()) / 1000));
-    sessionTime.textContent = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+    bindText(sessionTime, `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`);
     document.querySelector('.session-bar').classList.toggle('urgent', seconds <= 60);
     const warnings = [60, 30, 10].filter(threshold => seconds > 0 && seconds <= threshold && !announced.has(threshold));
     if (warnings.length) {
       warnings.forEach(threshold => announced.add(threshold));
-      document.getElementById('session-announcement').textContent = `Pozostało ${seconds} sekund na wysłanie zdjęcia.`;
+      bindText(document.getElementById('session-announcement'), t('Pozostało {seconds} sekund na wysłanie zdjęcia.', { seconds }));
     }
     if (!seconds) {
-      sessionState('Czas na wysłanie minął', '0:00', 'Przytrzymaj SW7 przez 3 sekundy, aby ponownie otworzyć hotspot.');
-      document.getElementById('session-announcement').textContent = 'Czas na wysłanie zdjęcia minął.';
+      sessionState(t('Czas na wysłanie minął'), '0:00', t('Przytrzymaj SW7 przez 3 sekundy, aby ponownie otworzyć hotspot.'));
+      bindText(document.getElementById('session-announcement'), t('Czas na wysłanie zdjęcia minął.'));
       document.getElementById('send').disabled = true;
     }
   };
@@ -84,7 +86,7 @@ form.addEventListener('submit', async event => {
   event.preventDefault();
   const file = document.getElementById('file').files[0];
   if (!file || file.size > 7000000 || !['image/png', 'image/jpeg'].includes(file.type)) {
-    status.textContent = 'Wybierz zdjęcie PNG lub JPEG o rozmiarze do 7 MB (7 000 000 bajtów).'; return;
+    bindText(status, t('Wybierz zdjęcie PNG lub JPEG o rozmiarze do 7 MB (7 000 000 bajtów).')); return;
   }
   const orientation = document.getElementById('orientation').value;
   const sizing = document.getElementById('sizing').value;
@@ -92,8 +94,8 @@ form.addEventListener('submit', async event => {
   controls.forEach(control => { control.disabled = true; });
   showDiagnostic();
   document.getElementById('send').disabled = true;
-  showProgress(0, 0, 'Przygotowanie');
-  status.textContent = 'Przygotowujemy zdjęcie w przeglądarce. Czas na rozpoczęcie wysyłania nadal biegnie.';
+  showProgress(0, 0, t('Przygotowanie'));
+  bindText(status, t('Przygotowujemy zdjęcie w przeglądarce. Czas na rozpoczęcie wysyłania nadal biegnie.'));
   let resized;
   try {
     const image = await createImageBitmap(file);
@@ -102,7 +104,7 @@ form.addEventListener('submit', async event => {
       const landscape = orientation === 'landscape';
       canvas.width = landscape ? 1600 : 1200; canvas.height = landscape ? 1200 : 1600;
       const ctx = canvas.getContext('2d');
-      if (!ctx) throw new Error('Przeglądarka nie udostępnia narzędzia do obróbki obrazu.');
+      if (!ctx) throw new Error(resolveText(t('Przeglądarka nie udostępnia narzędzia do obróbki obrazu.')));
       ctx.fillStyle = 'white'; ctx.fillRect(0, 0, canvas.width, canvas.height);
       ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
       if (sizing === 'fit') {
@@ -113,43 +115,46 @@ form.addEventListener('submit', async event => {
         ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
       }
       resized = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
-      if (!resized || resized.size > 4194304) throw new Error('Nie udało się utworzyć pliku PNG w limicie 4 MiB. Spróbuj innego zdjęcia.');
+      if (!resized || resized.size > 4194304) throw new Error(resolveText(t('Nie udało się utworzyć pliku PNG w limicie 4 MiB. Spróbuj innego zdjęcia.')));
     } finally { image.close(); }
   } catch (error) {
     failProgress();
     showDiagnostic(error.message);
-    retry('Nie udało się przygotować zdjęcia. Wybierz inne i spróbuj ponownie.', Math.max(0, (deadline - performance.now()) / 1000));
+    retry(t('Nie udało się przygotować zdjęcia. Wybierz inne i spróbuj ponownie.'), Math.max(0, (deadline - performance.now()) / 1000));
     return;
   }
   if (performance.now() >= deadline) {
     failProgress();
-    status.textContent = 'Podczas przygotowywania zdjęcia upłynął czas hotspotu. Przytrzymaj SW7 przez 3 sekundy, aby otworzyć go ponownie.';
+    bindText(status, t('Podczas przygotowywania zdjęcia upłynął czas hotspotu. Przytrzymaj SW7 przez 3 sekundy, aby otworzyć go ponownie.'));
     return;
   }
-  showProgress(0, 0, 'Wysyłanie');
-  sessionState('Trwa wysyłanie', 'W toku', 'Czas zamknięcia hotspotu zależy teraz od przesyłania i aktualizacji ekranu.');
+  showProgress(0, 0, t('Wysyłanie'));
+  sessionState(t('Trwa wysyłanie'), t('W toku'), t('Czas zamknięcia hotspotu zależy teraz od przesyłania i aktualizacji ekranu.'));
   const xhr = new XMLHttpRequest();
   xhr.open('POST', `/upload?orientation=${orientation}&corner=${corner}`);
   xhr.setRequestHeader('Content-Type', 'image/png');
   xhr.timeout = __PROCESS_TIMEOUT_MS__;
   xhr.upload.onprogress = e => {
-    showProgress(0, 0, e.lengthComputable ? `${Math.round(e.loaded / e.total * 100)}%` : 'Wysyłanie');
-    status.textContent = e.lengthComputable ? `Wysyłamy zdjęcie: ${Math.round(e.loaded / e.total * 100)}%.` : 'Wysyłamy zdjęcie…';
+    showProgress(0, 0, e.lengthComputable ? `${Math.round(e.loaded / e.total * 100)}%` : t('Wysyłanie'));
+    bindText(status, e.lengthComputable ? t('Wysyłamy zdjęcie: {percent}%.', {
+      percent: Math.round(e.loaded / e.total * 100),
+    }) : t('Wysyłamy zdjęcie…'));
   };
   xhr.upload.onload = () => {
-    showProgress(0, 0, 'Potwierdzanie');
-    status.textContent = 'Zdjęcie wysłane. Czekamy na potwierdzenie ramki. Nie odłączaj zasilania ani Wi-Fi.';
+    showProgress(0, 0, t('Potwierdzanie'));
+    bindText(status, t('Zdjęcie wysłane. Czekamy na potwierdzenie ramki. Nie odłączaj zasilania ani Wi-Fi.'));
   };
   let offset = 0, pending = '', terminal = false, protocolFailed = false;
   function unknown(message) {
-    sessionState('Stan połączenia nieznany', 'Brak danych', 'Nie znamy czasu zamknięcia hotspotu. Sprawdź ekran ramki lub logi.');
+    sessionState(t('Stan połączenia nieznany'), t('Brak danych'), t('Nie znamy czasu zamknięcia hotspotu. Sprawdź ekran ramki lub logi.'));
     failProgress();
-    status.textContent = `${message} Nie znamy końcowego wyniku. Nie odłączaj zasilania. Przed ponowną próbą sprawdź ekran ramki lub logi urządzenia.`;
+    const guidance = t('Nie znamy końcowego wyniku. Nie odłączaj zasilania. Przed ponowną próbą sprawdź ekran ramki lub logi urządzenia.');
+    bindText(status, () => `${resolveText(message)} ${guidance()}`);
   }
   function success() {
     showDiagnostic();
     showProgress(4, null);
-    status.textContent = 'Gotowe! Twoje zdjęcie jest już w ramce.';
+    bindText(status, t('Gotowe! Twoje zdjęcie jest już w ramce.'));
     shutdownCountdown();
   }
   function consumeProgress() {
@@ -160,30 +165,30 @@ form.addEventListener('submit', async event => {
     while ((end = pending.indexOf('\n')) !== -1) {
       const line = pending.slice(0, end); pending = pending.slice(end + 1);
       if (!line) continue;
-      if (terminal) { protocolFailed = true; unknown('Otrzymano nieoczekiwane dane po wyniku końcowym.'); return; }
+      if (terminal) { protocolFailed = true; unknown(t('Otrzymano nieoczekiwane dane po wyniku końcowym.')); return; }
       const [event, ...fields] = line.split('\t');
       if (event === 'received' && fields.length === 0) {
-        sessionState('Trwa aktualizacja ramki', 'W toku', 'Hotspot pozostaje aktywny do wyniku. Dokładny czas zakończenia nie jest znany.');
-        showProgress(1, 1, 'Przetwarzanie');
-        status.textContent = 'Zdjęcie dotarło. Ramka dopasowuje kolory i zapisuje obraz…';
+        sessionState(t('Trwa aktualizacja ramki'), t('W toku'), t('Hotspot pozostaje aktywny do wyniku. Dokładny czas zakończenia nie jest znany.'));
+        showProgress(1, 1, t('Przetwarzanie'));
+        bindText(status, t('Zdjęcie dotarło. Ramka dopasowuje kolory i zapisuje obraz…'));
       } else if (event === 'processed' && fields.length === 0) {
-        showProgress(2, 2, 'Przygotowanie');
-        status.textContent = 'Zdjęcie zapisane. Przygotowujemy ekran…';
+        showProgress(2, 2, t('Przygotowanie'));
+        bindText(status, t('Zdjęcie zapisane. Przygotowujemy ekran…'));
       } else if (event === 'displaying' && fields.length === 0) {
-        showProgress(2, 2, 'Odświeżanie');
-        status.textContent = 'Odświeżamy galerię sław. To potrwa chwilę — nie odłączaj zasilania ani Wi-Fi.';
+        showProgress(2, 2, t('Odświeżanie'));
+        bindText(status, t('Odświeżamy galerię sław. To potrwa chwilę — nie odłączaj zasilania ani Wi-Fi.'));
       } else if (event === 'displayed' && fields.length === 0) {
-        showProgress(3, 3, 'Kończenie');
-        status.textContent = 'Zdjęcie na ekranie. Kończymy aktualizację…';
+        showProgress(3, 3, t('Kończenie'));
+        bindText(status, t('Zdjęcie na ekranie. Kończymy aktualizację…'));
       } else if (event === 'success' && fields.length === 1) {
         terminal = true; success();
       } else if (event === 'retry' && fields.length === 2 && /^\d+$/.test(fields[0])) {
-        terminal = true; failProgress(); showDiagnostic(fields[1]); retry('Ramka nie mogła przyjąć tego zdjęcia. Możesz spróbować ponownie.', Number(fields[0]));
+        terminal = true; failProgress(); showDiagnostic(fields[1]); retry(t('Ramka nie mogła przyjąć tego zdjęcia. Możesz spróbować ponownie.'), Number(fields[0]));
       } else if (event === 'fatal' && fields.length === 1) {
-        sessionState('Błąd urządzenia', 'Zamykanie', 'Hotspot zostanie zamknięty. Sprawdź szczegóły i logi ramki.');
-        terminal = true; failProgress(); showDiagnostic(fields[0]); status.textContent = 'Aktualizacja została zatrzymana z powodu błędu urządzenia. Nie wysyłaj zdjęcia ponownie. Sprawdź szczegóły techniczne i logi ramki.';
+        sessionState(t('Błąd urządzenia'), t('Zamykanie'), t('Hotspot zostanie zamknięty. Sprawdź szczegóły i logi ramki.'));
+        terminal = true; failProgress(); showDiagnostic(fields[0]); bindText(status, t('Aktualizacja została zatrzymana z powodu błędu urządzenia. Nie wysyłaj zdjęcia ponownie. Sprawdź szczegóły techniczne i logi ramki.'));
       } else {
-        protocolFailed = true; unknown('Nieprawidłowa odpowiedź o postępie aktualizacji.'); return;
+        protocolFailed = true; unknown(t('Nieprawidłowa odpowiedź o postępie aktualizacji.')); return;
       }
     }
   }
@@ -193,20 +198,20 @@ form.addEventListener('submit', async event => {
   xhr.onload = () => {
     if (xhr.status === 200) {
       consumeProgress();
-      if (!protocolFailed && (!terminal || pending)) unknown('Połączenie zakończyło się bez pełnego wyniku.');
+      if (!protocolFailed && (!terminal || pending)) unknown(t('Połączenie zakończyło się bez pełnego wyniku.'));
     } else {
       failProgress();
       showDiagnostic(xhr.responseText || `HTTP ${xhr.status}`);
-      const message = 'Ramka odrzuciła żądanie. Sprawdź plik i szczegóły techniczne.';
+      const message = t('Ramka odrzuciła żądanie. Sprawdź plik i szczegóły techniczne.');
       const remaining = xhr.getResponseHeader('X-Window-Seconds');
       if (remaining !== null && Number.isFinite(Number(remaining))) retry(message, Number(remaining));
       else {
-        sessionState('Stan hotspotu nieznany', 'Brak danych', 'Ramka nie podała pozostałego czasu połączenia.');
-        status.textContent = message;
+        sessionState(t('Stan hotspotu nieznany'), t('Brak danych'), t('Ramka nie podała pozostałego czasu połączenia.'));
+        bindText(status, message);
       }
     }
   };
-  xhr.onerror = () => { if (!terminal) unknown('Utracono połączenie z ramką.'); };
-  xhr.ontimeout = () => { if (!terminal) unknown('Upłynął czas oczekiwania na odpowiedź ramki.'); };
+  xhr.onerror = () => { if (!terminal) unknown(t('Utracono połączenie z ramką.')); };
+  xhr.ontimeout = () => { if (!terminal) unknown(t('Upłynął czas oczekiwania na odpowiedź ramki.')); };
   xhr.send(resized);
 });

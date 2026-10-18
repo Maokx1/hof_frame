@@ -70,7 +70,7 @@ body {
 }
 
 html {
-    scroll-padding-top: 120px
+    scroll-padding-top: 140px
 }
 
 main {
@@ -117,6 +117,25 @@ header .aside {
     font: italic 1rem Georgia, serif;
     color: #d4b887;
     margin: -4px auto 22px;
+}
+
+.language-row {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-bottom: 24px;
+}
+
+.language-row label {
+    font-size: .75rem;
+}
+
+#language {
+    width: auto;
+    margin: 0;
+    padding: 4px 8px;
+    font-size: .8rem;
 }
 
 .field-heading {
