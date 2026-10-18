@@ -153,7 +153,7 @@ arms only the RTC timer; a later wake rechecks button release.
 
 1. Hold SW7, join WPA2 **HOF-Frame**, and stay connected despite the "no internet"
    warning. One client at a time.
-2. Open **http://192.168.4.1**. DHCP uses the explicitly configured
+2. Open **[http://192.168.4.1](http://192.168.4.1)**. DHCP uses the explicitly configured
    `192.168.4.1/24` subnet; the ready log checks the actual interface address.
 3. Select portrait (1200 x 1600) or landscape (1600 x 1200), Stretch or Fit,
    and the battery-box corner. Choose PNG/JPEG up to **7 MB (7,000,000 bytes)**.

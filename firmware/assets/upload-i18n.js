@@ -74,7 +74,7 @@ const translations = {
   'Gotowe! Twoje zdjęcie jest już w ramce.': 'Done! Your photo is now on the frame.',
   'Otrzymano nieoczekiwane dane po wyniku końcowym.': 'Unexpected data received after the final result.',
   'Trwa aktualizacja ramki': 'Updating the frame',
-  'Hotspot pozostaje aktywny do wyniku. Dokładny czas zakończenia nie jest znany.': 'The hotspot stays active until the result. The exact completion time is unknown.',
+  'Hotspot pozostaje aktywny do otrzymania wyniku. Dokładny czas zakończenia nie jest znany.': 'The hotspot stays active until the result. The exact completion time is unknown.',
   'Przetwarzanie': 'Processing',
   'Zdjęcie dotarło. Ramka dopasowuje kolory i zapisuje obraz…': 'Photo received. The frame is converting colors and saving the image…',
   'Zdjęcie zapisane. Przygotowujemy ekran…': 'Photo saved. Preparing the display…',
