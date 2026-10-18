@@ -9,7 +9,6 @@ const WHITE: u8 = 1;
 const BLACK: u8 = 0;
 const ICON_WIDTH: usize = 17;
 const ICON_HEIGHT: usize = 11;
-const ICON_GAP: usize = 5;
 const PADDING: usize = 5;
 
 pub struct StatusOverlay {
@@ -22,9 +21,9 @@ pub struct StatusOverlay {
 impl StatusOverlay {
     pub fn new(metadata: Metadata, percentage: Option<u8>) -> Result<Self, String> {
         let text = match percentage {
-            Some(value) if value <= 100 => format!("{value}%"),
+            Some(value) if value <= 100 => format!(" {value}%"),
             Some(_) => return Err("battery percentage exceeds 100".into()),
-            None => "?%".into(),
+            None => " ?%".into(),
         };
         let font = fontdue::Font::from_bytes(
             include_bytes!("../assets/status-font.ttf") as &[u8],
@@ -32,7 +31,7 @@ impl StatusOverlay {
         )
         .map_err(str::to_owned)?;
         let mut size = 32.0 * TEXT_HEIGHT as f32 / font.metrics('?', 32.0).height as f32;
-        let text_budget = BOX_WIDTH - 2 * (BORDER + PADDING) - ICON_WIDTH - ICON_GAP;
+        let text_budget = BOX_WIDTH - 2 * (BORDER + PADDING) - ICON_WIDTH;
         while text
             .chars()
             .map(|ch| font.metrics(ch, size).advance_width.ceil() as usize)
@@ -66,7 +65,7 @@ impl StatusOverlay {
             .min()
             .ok_or("empty status text")?;
         let height = usize::try_from(ascent - descent).map_err(|_| "invalid font bounds")?;
-        let content_width = ICON_WIDTH + ICON_GAP + width;
+        let content_width = ICON_WIDTH + width;
         if content_width > BOX_WIDTH - 2 * (BORDER + PADDING) || height > BOX_HEIGHT - 2 * BORDER {
             return Err("status text does not fit the battery box".into());
         }
@@ -93,7 +92,7 @@ impl StatusOverlay {
                 }
             }
         }
-        let mut pen = (icon_left + ICON_WIDTH + ICON_GAP) as i32;
+        let mut pen = (icon_left + ICON_WIDTH) as i32;
         let baseline = ((BOX_HEIGHT - height) / 2) as i32 + ascent;
         // The panel has no gray: ordered coverage preserves outline-rasterized edges.
         const COVERAGE: [[u16; 4]; 4] =
@@ -258,7 +257,18 @@ mod tests {
                 overlay.pixels[(y + ICON_HEIGHT / 2) * BOX_WIDTH + left + ICON_WIDTH - 1],
                 BLACK
             );
-            assert!((left + ICON_WIDTH + ICON_GAP..BOX_WIDTH - BORDER)
+            let font = fontdue::Font::from_bytes(
+                include_bytes!("../assets/status-font.ttf") as &[u8],
+                fontdue::FontSettings::default(),
+            )
+            .unwrap();
+            let size = 32.0 * TEXT_HEIGHT as f32 / font.metrics('?', 32.0).height as f32;
+            let space_width = font.metrics(' ', size).advance_width.ceil() as usize;
+            assert!(space_width > 0);
+            assert!((left + ICON_WIDTH..left + ICON_WIDTH + space_width)
+                .all(|x| (BORDER..BOX_HEIGHT - BORDER)
+                    .all(|y| overlay.pixels[y * BOX_WIDTH + x] == WHITE)));
+            assert!((left + ICON_WIDTH + space_width..BOX_WIDTH - BORDER)
                 .any(|x| (BORDER..BOX_HEIGHT - BORDER)
                     .any(|y| overlay.pixels[y * BOX_WIDTH + x] == BLACK)));
         }
