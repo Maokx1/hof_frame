@@ -1,4 +1,5 @@
 use std::ptr::NonNull;
+use std::time::Instant;
 
 use esp_idf_svc::hal::delay::FreeRtos;
 use esp_idf_svc::sys::{self, EspError};
@@ -30,6 +31,7 @@ impl Drop for PsramBuffer {
 }
 
 pub fn verify() -> Result<(), EspError> {
+    let started = Instant::now();
     let caps = sys::MALLOC_CAP_SPIRAM | sys::MALLOC_CAP_8BIT;
     let physical = unsafe { sys::esp_psram_get_size() };
     let total = unsafe { sys::heap_caps_get_total_size(caps) };
@@ -46,7 +48,10 @@ pub fn verify() -> Result<(), EspError> {
                 std::ptr::write_volatile(byte, (block as u8).wrapping_mul(31) ^ index as u8);
             }
         }
-        FreeRtos::delay_ms(1);
+        // Yield every 64 KiB; each nonzero delay costs at least one RTOS tick.
+        if block % 16 == 15 {
+            FreeRtos::delay_ms(1);
+        }
     }
     for (block, bytes) in buffer.bytes_mut().chunks(4096).enumerate() {
         for (index, byte) in bytes.iter().enumerate() {
@@ -56,12 +61,15 @@ pub fn verify() -> Result<(), EspError> {
                 return Err(EspError::from(sys::ESP_ERR_INVALID_STATE).unwrap());
             }
         }
-        FreeRtos::delay_ms(1);
+        if block % 16 == 15 {
+            FreeRtos::delay_ms(1);
+        }
     }
     verify_decoder_heap()?;
     drop(buffer);
     log::info!(
-        "PSRAM: PASS; explicit 4194304-byte allocation write/read verified; buffer released"
+        "PSRAM: PASS; explicit 4194304-byte allocation write/read verified; buffer released; elapsed={} ms",
+        started.elapsed().as_millis()
     );
     Ok(())
 }
