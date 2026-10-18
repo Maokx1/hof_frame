@@ -259,6 +259,22 @@ pyftsubset /usr/share/fonts/truetype/dejavu/DejaVuSans.ttf \
 
 ## Validation and acceptance
 
+The upload page is Polish-first, with a self-contained dark/amber layout.
+It needs no internet connection, CDN, or remote fonts. English UI switching
+is deferred; raw device errors remain available under “Szczegóły techniczne”
+while user-facing progress, retry, and connection-loss guidance is in Polish.
+Edit markup in [upload.html](assets/upload.html), styles in
+[upload.css](assets/upload.css), and behavior in [upload.js](assets/upload.js).
+Firmware embeds the CSS and JavaScript into the HTML template when serving it,
+so the browser still receives one self-contained page, with no extra asset
+requests. The template also supplies the current timeout values.
+An always-visible sticky session bar shows the remaining send window, including
+while the browser prepares the image. It is independent of status/error text.
+During transfer and display work, the shutdown time is unknown and is labelled
+accordingly; success starts the six-second shutdown countdown, and retry uses
+the remaining time reported by the board. Screen readers receive time warnings
+at 60, 30, and 10 seconds rather than announcements on every timer tick.
+
 ```sh
 cd firmware
 cargo +stable test --manifest-path host-tests/Cargo.toml --target x86_64-unknown-linux-gnu

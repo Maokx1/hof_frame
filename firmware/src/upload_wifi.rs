@@ -237,9 +237,13 @@ pub fn run(
                         "200 OK",
                         "text/html; charset=utf-8",
                         &PAGE
+                            .replace("/* __STYLES__ */", include_str!("../assets/upload.css"))
+                            .replace("/* __SCRIPT__ */", include_str!("../assets/upload.js"))
                             .replace("__SECONDS__", &remaining.to_string())
-                            .replace("__PROCESS_TIMEOUT_MS__", &upload::BROWSER_RESULT_TIMEOUT.as_millis().to_string())
-                            .replace("__DISPLAY_MODE__", "A successful save triggers a REAL screen refresh. Wi-Fi stays on for the final result, then closes six seconds after success. Keep stable power connected."),
+                            .replace(
+                                "__PROCESS_TIMEOUT_MS__",
+                                &upload::BROWSER_RESULT_TIMEOUT.as_millis().to_string(),
+                            ),
                     ) {
                         log::warn!("UploadWindow: page response failed: {error}");
                     }
