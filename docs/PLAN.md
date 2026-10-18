@@ -58,7 +58,6 @@ The holder listing and board specifications must be checked against the physical
 
 Checked against photos of the received board and Good Display's ESP32-133C02-IL specification and panel schematic (the panel schematic does not cover the driver board).
 
-- **Buttons.** SW2, SW3 and SW4 (GPIO12/13/14) are not fitted and no empty footprints for them were found. The two fitted switches on the right edge are labelled SW7 and SW8: **SW8 drives GPIO12 and SW7 drives GPIO13, both pull-up, active-low**. SW7 was verified with five clicks and repeated deep-sleep wake cycles; the user confirmed the same polarity for SW8. The firmware uses SW7/GPIO13 as its RTC wake input. SW8/GPIO12 remains available for a future function. The previous assumption that these switches only drove the IP5306 was incorrect.
 - **Onboard Li-ion charger.** An IP5306 power-bank IC (U14) and a battery connector are fitted. The board is designed for one Li-ion cell. **Never connect the NiMH pack to the board's battery connector**; the IP5306 would try to charge it as a 4.2 V cell.
 - **NiMH path is questionable.** The planned converter, diode, then board 5 V input feeds the IP5306's USB-side input. Before committing to it:
   - Confirm the pad used is VBUS (the IP5306 input), not its 5 V output.
@@ -66,6 +65,7 @@ Checked against photos of the received board and Good Display's ESP32-133C02-IL 
   - Power-bank ICs usually switch their output off after about 30 s of light load; confirm the board survives a minute of deep sleep.
   - The IP5306 and charge path add to the board sleep current, which is still unmeasured. Measure it before trusting the runtime estimate.
   - If sleep current or output shut-off is a problem, the fallback is to remove or bypass the IP5306 and power the 5 V rail directly (invasive).
+- **Buttons.** SW2/SW3/SW4 are not fitted. The fitted **SW8/GPIO12 and SW7/GPIO13 are pull-up, active-low**. SW7 is the RTC wake/gesture input. SW8 toggles an idle-only simulated fault in USB mode and is unused in production. The previous assumption that these switches only drove the IP5306 was incorrect.
 - **Panel pins** (from the specification and the vendor example): SPI SCK GPIO9, MOSI GPIO41, MISO GPIO40, CS_M GPIO18, CS_S GPIO17, RST GPIO6, BUSY GPIO7 (low while busy), and a panel power **load switch on GPIO45** (high = on). `firmware/src/epd.rs` ports the vendor init sequence.
 - **Debug port.** The native USB-Serial/JTAG enumerates as `303a:1001`, `/dev/ttyACM0`. In deep sleep the port disappears, and with no wake input the board must be unplugged and re-plugged (or reset) to flash again.
 
@@ -172,7 +172,7 @@ Because the converter's cutoff is not latching, a pack that recovers after shutd
 - Set the latch when the firmware measures a pack voltage below the low-battery threshold, sees a brownout reset, or finds that the previous cycle did not finish cleanly. Detect the last case with a "work in progress" flag set before a transfer, flash write or refresh and cleared just before entering deep sleep.
 - Check the pack voltage on every power-on reset, since cell swaps and converter restarts both look like a power-on. If the voltage is below a recovery threshold, set the latch and sleep.
 - While latched, do no Wi-Fi, image flash writes or refresh, and return to deep sleep after safe button-release handling. Only necessary latch metadata changes may be written; do not rewrite unchanged metadata on every wake. The 24-hour timer wake still happens, but only re-checks and sleeps again.
-- Clear it only when **the user acknowledges it** with a qualified five-second SW7/GPIO13 hold, and only if the pack voltage is above a recovery threshold higher than the low-battery threshold (hysteresis). Freshly charged or replaced cells (about 5.2–5.8 V) pass easily; recovered tired cells (about 4.8–4.9 V) do not.
+- Clear it only when **the user acknowledges it** with a qualified three-second SW7/GPIO13 hold, and only if the pack voltage is above a recovery threshold higher than the low-battery threshold (hysteresis). Freshly charged or replaced cells (about 5.2–5.8 V) pass easily; recovered tired cells (about 4.8–4.9 V) do not.
 - Pick both thresholds from the loaded-voltage characterization and real discharged cells, and verify on the bench that the converter does not cycle.
 
 While latched, a button press with a recovered-but-still-low pack must not clear it, so the frame needs some way to tell the user why it did nothing. **Decision:** when the latch first sets, refresh once with a "Replace batteries" screen, only if the measured voltage still has margin for that refresh above the converter cutoff; otherwise keep the current picture. See [low-battery screen](../firmware/STATE_MACHINE.md#low-battery-screen).
@@ -193,6 +193,16 @@ Target the ESP32-S3-WROOM-1 using an ESP-IDF-backed Rust project (`esp-idf-svc`)
 
 Image upload uses a **Wi-Fi access point and an embedded web page**, not Bluetooth (see "Image transfer" and "Future: Bluetooth").
 
+Firmware has two build modes: default production (real sleep, 24-hour scheduled
+refresh) and `--features usb` (logged/simulated sleep, real display every
+60 seconds after completion). Upload, conversion, storage, web progress, and
+panel cleanup are shared. Both retain the one-hour manual limit. USB's SW8
+toggles an idle-only simulated fault, initially off; actual runtime faults
+remain separate in `hof_usb` and block the running session; USB reboot logs
+and resets that guard to Clean as an explicit development policy, not qualified
+battery recovery. Production `hof_safety` is not
+cleared by USB development. Battery operation remains unqualified.
+
 The detailed [firmware state-machine specification](../firmware/STATE_MACHINE.md)
 defines state contracts, upload/commit sequencing, safety recovery, required
 components, acceptance checks, and open decisions. The diagram below is a
@@ -206,8 +216,8 @@ flowchart TD
     E["Arm 24-hour RTC timer,<br/>return to deep sleep"]
     F["Cancel idle timeout,<br/>apply transfer deadline"]
     G{"Upload complete<br/>and valid?"}
-    H["Reply 200 OK, stop Wi-Fi,<br/>decode, dither, persist, render"]
-    I["Reply error,<br/>preserve last valid screen"]
+    H["AP stays on: decode, dither, persist, render,<br/>reply final result, wait six seconds, AP off"]
+    I["Reply error; preserve screen,<br/>bounded retry for recoverable failures"]
     J["24-hour RTC wake"]
     K["Refresh persisted frame<br/>Wi-Fi disabled"]
     L{"Low-battery latch set<br/>or voltage too low?"}
@@ -222,7 +232,9 @@ flowchart TD
     D -->|No| E
     D -->|Yes| F --> G
     G -->|Yes| H --> E
-    G -->|No or interrupted| I --> E
+    G -->|No or interrupted| I
+    I -->|Retry time remains| D
+    I -->|Expired or fatal| E
     A -->|Timer| J --> L2
     L2 -->|Yes| E
     L2 -->|No| K --> E
@@ -231,16 +243,16 @@ flowchart TD
 Required behavior:
 
 1. Wake from deep sleep using SW7/GPIO13 or the 24-hour RTC timer and identify the wake cause.
-2. On a button wake, qualify a five-second SW7/GPIO13 hold before starting a Wi-Fi access point (SSID `HOF-Frame`, WPA2, password fixed at build time, kept out of git, and printed on the frame) and an HTTP server that serves a single upload page at `http://192.168.4.1`. Shorter presses return to sleep without starting Wi-Fi.
+2. On a button wake, qualify a three-second SW7/GPIO13 hold before starting a Wi-Fi access point (SSID `HOF-Frame`, WPA2, password fixed at build time, kept out of git, and printed on the frame) and an HTTP server that serves a single upload page at `http://192.168.4.1`. Shorter presses return to sleep without starting Wi-Fi.
 3. Start a five-minute idle timer when the access point comes up, then shorten it after measuring real transfers.
-4. Cancel the idle timer when an upload request starts and apply the transfer deadline instead.
-5. Receive and validate a complete image. After a successful upload reply `200 OK` ("received") and stop Wi-Fi *before* the slow decode and refresh.
+4. Apply transfer deadlines to an accepted upload; retain the original idle/global deadline for any retries without extending it.
+5. Receive and validate a complete image. Keep Wi-Fi active through decode, verified save, display refresh, and safety cleanup. Stream real stages to a four-part web progress bar (Send image, Process image, Update display, Complete); only the terminal success event confirms completion, not the initial HTTP status. Wait six seconds after success before shutting down the AP.
 6. Decode, stretch to the orientation chosen on the upload page (landscape 1600×1200 or portrait 1200×1600), apply the required Spectra 6 color conversion and dithering, persist a display-ready frame with its orientation and battery-indicator corner, and render only a complete, decodable, integrity-checked image. Every refresh overlays a small battery-percentage box in the chosen corner (top right by default). On a cold boot with a valid photo saved, refresh it.
 7. On an RTC wake, refresh the persisted frame with Wi-Fi disabled, then return to deep sleep. If no valid photo is saved (first boot, never uploaded, or corrupt), refresh a generated default frame instead: white screen with a small battery-percentage rectangle.
 8. On a button wake, three SW7/GPIO13 presses within 3 s from wake (counting the waking press) trigger a manual refresh: the same battery-guarded, Wi-Fi-off path as the RTC refresh. It does not clear the low-battery latch. At most one manual refresh per hour; a triple press within the hour is ignored. See [SW7 gestures](../firmware/STATE_MACHINE.md#sw7-gestures).
 9. Below the measured low-battery threshold, or while the low-battery latch is set, do not start Wi-Fi or a display refresh; the converter's built-in cutoff disables its output. When the latch first sets, show a "Replace batteries" screen once, only if the voltage still has margin for that refresh.
-10. A failed transfer (before the page reports "received") leaves the current persisted frame and panel contents unchanged. If a received photo then fails to decode, validate, or save, refresh the previous picture with a red exclamation mark in the battery box; if no valid photo was saved, refresh the white default frame with the red mark instead. The mark stays until the next successful upload.
-11. The 24-hour period restarts only when a refresh happens (daily, manual, cold boot, after an upload, or error-mark refresh). Wakes without a refresh (short press, upload timeout, rate-limited triple press) re-arm the timer for the remaining time, so they do not postpone the daily refresh. A low-battery skip arms a full 24 hours to re-check.
+10. Transfer/decode rejection leaves the persisted frame and display unchanged and permits retry within the original bounded window. Save/display/safety faults report failure on the web page where possible, then stop and latch without automatic retry. Retain any valid committed photo; never trigger an extra fallback refresh or persistent error mark.
+11. The 24-hour period restarts only when a refresh completes successfully (daily, manual, cold boot, or after an upload). Wakes without a refresh (short press, upload timeout, rate-limited triple press) re-arm the timer for the remaining time, so they do not postpone the daily refresh. A low-battery skip arms a full 24 hours to re-check.
 12. Do not enter deep sleep while SW7/GPIO13 (active-low, pull-up) is still held, otherwise the pin level immediately wakes the device again. Wait for release (with debounce) first. If it is still held after 60 s (stuck or pressed by the enclosure), sleep with only the RTC timer armed and re-enable button wake on a later timer wake once it is released. Presses during a refresh or transfer are ignored.
 13. The ESP32-S3 RTC timer runs from the internal RC slow clock, which is not crystal-accurate and drifts with temperature and supply; several percent error, i.e. an hour or more per 24 h, is plausible. "Every 24 hours" is therefore nominal. Measure the actual period at bring-up; it does not need correction unless the refresh time of day matters.
 
@@ -249,25 +261,34 @@ Required behavior:
 **Decision.** Bluetooth Classic (the phone/PC "send file via Bluetooth" feature) is not available on the ESP32-S3, and generic BLE apps cannot practically send a multi-megabyte file with chunking, acknowledgements and integrity checks. The frame therefore serves a web page over its own Wi-Fi access point, which any phone or laptop browser can use with no app. This is a compromise: the project owner would prefer Bluetooth (see "Future: Bluetooth").
 
 - Flow: button wake, AP up, user joins `HOF-Frame` and opens the upload page (a captive-portal DNS responder is optional), picks an image, the browser POSTs it, and the page shows the result.
-- The page shows "sleeping in X seconds" while waiting for an upload, using
+- The page shows "Hotspot closes in X seconds" while waiting for an upload, using
   the board's remaining idle window; opening or reloading it does not restart
   that window. Upload start replaces the countdown with progress/status.
-  Successful receipt shows that Wi-Fi is closing and the screen will update
-  before sleep, not a claim that rendering has already succeeded. See the
+  After transfer, it shows processing/display waiting status. Final success
+  confirms the completed operation; the AP closes six seconds later. Recoverable
+  failures allow bounded retry; fatal failures stop work. See the
   [user-facing upload flow](../firmware/STATE_MACHINE.md#what-the-user-sees-during-the-upload-window).
 - TCP already provides ordering, retransmission and flow control, so no custom chunk or acknowledgement protocol is needed. No extra checksum is used; decode validation rejects damaged images.
-- There is no pre-processing client (the page may optionally resize in JavaScript later), so the device must decode, resize, color-convert and dither within the memory limits below.
+- The browser normalizes PNG/JPEG to a display-sized PNG with Stretch/Fit;
+  the device decodes, rotates, color-converts and dithers within bounded memory.
 - Accepted formats: PNG and JPEG.
-- Maximum size: 4 MiB for the encoded upload.
+- Maximum size: 7 MB (7,000,000 bytes) for the original browser-selected photo;
+  4 MiB for the resized encoded upload sent to the device.
 - Reject unsupported types and a `Content-Length` over the limit before allocating storage. Enforce the limit on declared size and on cumulative received bytes while streaming, and reject chunked or unknown-length bodies that exceed it.
-- One client, one upload per wake: accept one image, return success or failure, then stop the AP. Access control is the WPA2 password plus the physical button press; no application-level authentication.
-- Start the five-minute idle timer when the AP comes up and cancel it once an upload request starts. Replace it with a transfer-inactivity timeout and an absolute deadline so a stalled client cannot keep the frame awake.
+- One client, one successful upload per wake; retry recoverable failures only
+  within the original window. Access control is the WPA2 password plus the
+  physical button press; no application-level authentication.
+- Start the five-minute idle timer when the AP comes up. Enforce transfer
+  inactivity/absolute deadlines for each accepted body and preserve the original
+  idle/global deadline for new attempts so retries cannot keep the frame awake.
 - Decode only after the complete upload has been received and validated.
 - Reject images whose decoded width, height, pixel count, or working-memory requirement exceeds configured decoder limits, regardless of encoded size. This prevents decompression bombs and oversized malformed images from exhausting RAM.
-- The page lets the person choose landscape or portrait layout and the battery-indicator corner. Stretch every accepted image to the chosen layout (crop-to-fill or fit-with-borders may be added as page options later), then map pixels to the display's Spectra 6 palette with mandatory dithering.
-- The battery box initially measures 160 x 64 pixels, with 32-pixel-high
+- The page lets the person choose landscape or portrait layout, Stretch/Fit,
+  and the battery-indicator corner, then the board maps pixels to the display's
+  Spectra 6 palette with mandatory dithering.
+- The battery box measures 120 x 48 pixels, with up to 24-pixel-high
   smooth text, a white background and black border, and a 16-pixel margin
-  from the selected corner. Allow room for `100%` and the red error mark.
+  from the selected corner. Allow room for the full battery icon and `100%`.
   Verify appearance on the panel before finalizing the font and layout.
 - Store only the current encoded upload in bounded temporary memory. Discard it after successful rendering, but retain the display-ready frame in non-volatile storage so the mandatory 24-hour refresh can reproduce it. Update that stored frame atomically only after complete image validation.
 
@@ -311,7 +332,7 @@ Decided: SSID `HOF-Frame` with a build-time WPA2 password kept out of git; trans
 1. Confirm the ESP32-S3-WROOM-1 configuration, board GPIO map (including whether proposed battery-sense pin GPIO4 / ADC1_CH3 is broken out, or identify an alternative ADC input), display bus, SW7/GPIO13 (active-low, pull-up) wake behavior, PSRAM, flash layout, and Wi-Fi AP support.
 2. Create a minimal ESP-IDF-backed Rust project that builds, can be flashed during development, logs the wake cause, enters deep sleep, and redraws after SW7/GPIO13 wakes it. Measure the whole board's deep-sleep current at its 5 V input as early as possible, since it dominates the battery budget.
 3. Bring up the display with a simple test pattern and validate the refresh sequence.
-4. Implement SW7/GPIO13 gesture classification (five-second hold for upload, triple press for manual refresh) and 24-hour RTC wake handling, including the low-battery behavior for scheduled and manual refreshes.
+4. Implement SW7/GPIO13 gesture classification (three-second hold for upload, triple press for manual refresh) and 24-hour RTC wake handling, including the low-battery behavior for scheduled and manual refreshes.
 5. Implement the Wi-Fi access point, HTTP server and upload page with the receive window; measure real transfer duration and shorten the five-minute timeout to limit awake time and exposure.
 6. Implement the streamed PNG/JPEG upload with the 4 MiB guardrail and the transfer deadlines.
 7. Decode, color-map, atomically persist, and render one validated image.
