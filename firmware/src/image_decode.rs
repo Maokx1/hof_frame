@@ -16,9 +16,12 @@ pub fn save(
     encoded: &[u8],
     metadata: frame::Metadata,
     deadline: Instant,
+    safety: &mut firmware::safety::SafetyGuard<crate::safety_nvs::NvsSafetyStore>,
 ) -> Result<(), PipelineError> {
+    crate::set_work_phase(safety, firmware::safety::WorkPhase::Decode)
+        .map_err(|error| PipelineError::Fault(error.to_string()))?;
     log::info!(
-        "Upload pipeline: decoding {} encoded bytes by rows; {metadata:?}; Wi-Fi OFF; panel OFF",
+        "Upload pipeline: decoding {} encoded bytes by rows; {metadata:?}; AP ON; panel OFF",
         encoded.len()
     );
     let mut packed = PsramBuffer::new(frame::FRAME_BYTES)
@@ -46,6 +49,8 @@ pub fn save(
     log::info!(
         "Upload pipeline: conversion complete; committing 960000 packed bytes to inactive slot"
     );
+    crate::set_work_phase(safety, firmware::safety::WorkPhase::Save)
+        .map_err(|error| PipelineError::Fault(error.to_string()))?;
     let mut storage =
         FlashFrames::open().map_err(|error| PipelineError::Fault(error.to_string()))?;
     storage.set_deadline(deadline);

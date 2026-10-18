@@ -1,4 +1,4 @@
-use std::io::{self, BufRead};
+use std::io::{self, BufRead, Write};
 use std::time::Duration;
 
 use crate::frame::{Corner, Metadata, Orientation};
@@ -9,7 +9,78 @@ pub const INACTIVITY_TIMEOUT: Duration = Duration::from_secs(120);
 pub const TRANSFER_TIMEOUT: Duration = Duration::from_secs(120);
 pub const AWAKE_TIMEOUT: Duration = Duration::from_secs(600);
 pub const HEADER_TIMEOUT: Duration = Duration::from_secs(10);
+pub const RESULT_GRACE: Duration = Duration::from_secs(6);
+// A late-started refresh may use four 120-second BUSY waits after the awake budget.
+pub const BROWSER_RESULT_TIMEOUT: Duration =
+    Duration::from_secs(AWAKE_TIMEOUT.as_secs() + 600 + RESULT_GRACE.as_secs() + 5);
 const MAX_HEADER_BYTES: usize = 8192;
+
+#[derive(Clone, Copy)]
+pub enum ProgressStage {
+    Received,
+    Processed,
+    Displaying,
+    Displayed,
+}
+
+pub enum ProgressEvent<'a> {
+    Stage(ProgressStage),
+    Success(&'a str),
+    Retry(u64, &'a str),
+    Fatal(&'a str),
+}
+
+pub fn start_progress(stream: &mut impl Write) -> io::Result<()> {
+    stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: application/x-hof-progress; charset=utf-8\r\nTransfer-Encoding: chunked\r\nConnection: close\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\n\r\n")?;
+    stream.flush()
+}
+
+pub fn write_progress(stream: &mut impl Write, event: ProgressEvent<'_>) -> io::Result<()> {
+    let (line, terminal) = match event {
+        ProgressEvent::Stage(stage) => (
+            match stage {
+                ProgressStage::Received => "received\n",
+                ProgressStage::Processed => "processed\n",
+                ProgressStage::Displaying => "displaying\n",
+                ProgressStage::Displayed => "displayed\n",
+            }
+            .to_owned(),
+            false,
+        ),
+        ProgressEvent::Success(message) => {
+            (format!("success\t{}\n", progress_message(message)), true)
+        }
+        ProgressEvent::Retry(seconds, message) => (
+            format!("retry\t{seconds}\t{}\n", progress_message(message)),
+            true,
+        ),
+        ProgressEvent::Fatal(message) => (format!("fatal\t{}\n", progress_message(message)), true),
+    };
+    write!(stream, "{:x}\r\n{line}\r\n", line.len())?;
+    if terminal {
+        stream.write_all(b"0\r\n\r\n")?;
+    }
+    stream.flush()
+}
+
+fn progress_message(message: &str) -> String {
+    message.replace(['\r', '\n', '\t'], " ")
+}
+
+pub fn write_response(
+    stream: &mut impl Write,
+    status: &str,
+    kind: &str,
+    body: &str,
+    remaining: Option<u64>,
+) -> io::Result<()> {
+    write!(stream, "HTTP/1.1 {status}\r\nContent-Type: {kind}\r\nContent-Length: {}\r\nConnection: close\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\n", body.len())?;
+    if let Some(seconds) = remaining {
+        write!(stream, "X-Window-Seconds: {seconds}\r\n")?;
+    }
+    write!(stream, "\r\n{body}")?;
+    stream.flush()
+}
 
 pub fn valid_wifi_password(password: &str) -> bool {
     (8..=63).contains(&password.len()) && password.bytes().all(|byte| (0x20..=0x7E).contains(&byte))
@@ -243,6 +314,138 @@ pub fn image_signature(bytes: &[u8]) -> bool {
 mod tests {
     use super::*;
     use std::io::Cursor;
+
+    #[test]
+    fn progress_response_uses_chunked_framing_and_flushes_each_stage() {
+        let mut bytes = Vec::new();
+        start_progress(&mut bytes).unwrap();
+        let headers = String::from_utf8(bytes.clone()).unwrap();
+        assert!(headers.starts_with("HTTP/1.1 200 OK\r\n"));
+        assert!(headers.contains("Transfer-Encoding: chunked\r\n"));
+        assert!(!headers.contains("Content-Length:"));
+        assert!(headers.ends_with("\r\n\r\n"));
+        bytes.clear();
+        for (stage, text) in [
+            (ProgressStage::Received, "received\n"),
+            (ProgressStage::Processed, "processed\n"),
+            (ProgressStage::Displaying, "displaying\n"),
+            (ProgressStage::Displayed, "displayed\n"),
+        ] {
+            write_progress(&mut bytes, ProgressEvent::Stage(stage)).unwrap();
+            assert_eq!(bytes, format!("{:x}\r\n{text}\r\n", text.len()).as_bytes());
+            bytes.clear();
+        }
+    }
+
+    #[test]
+    fn final_progress_events_terminate_stream_and_cannot_inject_stages() {
+        for (event, line) in [
+            (ProgressEvent::Success("Saved."), "success\tSaved.\n"),
+            (
+                ProgressEvent::Retry(37, "Bad PNG."),
+                "retry\t37\tBad PNG.\n",
+            ),
+            (ProgressEvent::Retry(0, "Expired."), "retry\t0\tExpired.\n"),
+            (
+                ProgressEvent::Fatal("Fault\r\nsuccess\tfake"),
+                "fatal\tFault  success fake\n",
+            ),
+        ] {
+            let mut bytes = Vec::new();
+            write_progress(&mut bytes, event).unwrap();
+            assert_eq!(
+                bytes,
+                format!("{:x}\r\n{line}\r\n0\r\n\r\n", line.len()).as_bytes()
+            );
+        }
+    }
+
+    #[test]
+    fn progress_write_and_flush_errors_are_explicit() {
+        struct FlushFailure(Vec<u8>);
+        impl Write for FlushFailure {
+            fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+                self.0.extend_from_slice(bytes);
+                Ok(bytes.len())
+            }
+            fn flush(&mut self) -> io::Result<()> {
+                Err(io::Error::new(io::ErrorKind::BrokenPipe, "disconnected"))
+            }
+        }
+        assert_eq!(
+            start_progress(&mut FlushFailure(Vec::new()))
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::BrokenPipe,
+        );
+        assert_eq!(
+            write_progress(
+                &mut FlushFailure(Vec::new()),
+                ProgressEvent::Stage(ProgressStage::Processed)
+            )
+            .unwrap_err()
+            .kind(),
+            io::ErrorKind::BrokenPipe,
+        );
+        let mut bytes = [0_u8; 1];
+        assert_eq!(
+            write_progress(&mut bytes.as_mut_slice(), ProgressEvent::Success("Saved."))
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::WriteZero,
+        );
+    }
+
+    #[test]
+    fn final_response_is_complete_and_has_no_retry_window() {
+        let body = "Image saved and displayed.";
+        let mut bytes = Vec::new();
+        write_response(&mut bytes, "200 OK", "text/plain", body, None).unwrap();
+        let response = String::from_utf8(bytes).unwrap();
+        let (headers, received) = response.split_once("\r\n\r\n").unwrap();
+        assert!(headers.starts_with("HTTP/1.1 200 OK\r\n"));
+        assert!(headers.contains(&format!("Content-Length: {}\r\n", body.len())));
+        assert!(headers.contains("Connection: close\r\n"));
+        assert!(headers.contains("Cache-Control: no-store\r\n"));
+        assert!(!headers.contains("X-Window-Seconds"));
+        assert_eq!(received, body);
+    }
+
+    #[test]
+    fn rejection_response_exposes_remaining_window_including_expiry() {
+        for remaining in [0, 1, 123, IDLE_TIMEOUT.as_secs()] {
+            let mut bytes = Vec::new();
+            write_response(
+                &mut bytes,
+                "422 Unprocessable Content",
+                "text/plain",
+                "Choose another image.",
+                Some(remaining),
+            )
+            .unwrap();
+            let response = String::from_utf8(bytes).unwrap();
+            assert!(response.starts_with("HTTP/1.1 422 Unprocessable Content\r\n"));
+            assert!(response.contains(&format!("X-Window-Seconds: {remaining}\r\n")));
+            assert!(response.ends_with("\r\n\r\nChoose another image."));
+        }
+    }
+
+    #[test]
+    fn response_write_failure_is_not_reported_as_success() {
+        let mut bytes = [0_u8; 4];
+        assert_eq!(
+            write_response(
+                &mut bytes.as_mut_slice(),
+                "200 OK",
+                "text/plain",
+                "saved",
+                None
+            )
+            .unwrap_err()
+            .kind(),
+            io::ErrorKind::WriteZero,
+        );
+    }
 
     #[test]
     fn exact_four_mib_is_accepted_but_one_more_is_rejected() {

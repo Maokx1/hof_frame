@@ -1,4 +1,4 @@
-use std::io::{self, BufReader, Read, Write};
+use std::io::{self, BufReader, Read};
 use std::net::{TcpListener, TcpStream};
 use std::time::{Duration, Instant};
 
@@ -6,7 +6,7 @@ use esp_idf_svc::hal::delay::FreeRtos;
 use esp_idf_svc::wifi::{
     AccessPointConfiguration, AuthMethod, BlockingWifi, Configuration, EspWifi,
 };
-use firmware::upload::{self, ReceiveError, Request};
+use firmware::upload::{self, ProgressEvent, ProgressStage, ReceiveError, Request};
 
 use crate::psram::PsramBuffer;
 
@@ -18,6 +18,41 @@ pub struct Received {
     pub buffer: PsramBuffer,
     pub len: usize,
     pub metadata: firmware::frame::Metadata,
+}
+
+pub enum ProcessingError {
+    Retry(String),
+    Fatal(String),
+}
+
+pub fn setup(
+    modem: esp_idf_svc::hal::modem::Modem<'static>,
+) -> Result<BlockingWifi<EspWifi<'static>>, esp_idf_svc::sys::EspError> {
+    use esp_idf_svc::ipv4;
+    use esp_idf_svc::netif::{EspNetif, NetifConfiguration, NetifStack};
+    use esp_idf_svc::wifi::WifiDriver;
+
+    let event_loop = esp_idf_svc::eventloop::EspSystemEventLoop::take()?;
+    let ap_configuration = NetifConfiguration {
+        ip_configuration: Some(ipv4::Configuration::Router(ipv4::RouterConfiguration {
+            subnet: ipv4::Subnet {
+                gateway: AP_ADDRESS,
+                mask: "24".parse().expect("valid fixed subnet mask"),
+            },
+            dhcp_enabled: true,
+            dns: None,
+            secondary_dns: None,
+        })),
+        ..NetifConfiguration::wifi_default_router()
+    };
+    let wifi = EspWifi::wrap_all(
+        WifiDriver::new(modem, event_loop.clone(), None)?,
+        EspNetif::new(NetifStack::Sta)?,
+        EspNetif::new_with_conf(&ap_configuration)?,
+    )?;
+    let mut wifi = BlockingWifi::wrap(wifi, event_loop)?;
+    configure(&mut wifi)?;
+    Ok(wifi)
 }
 
 struct TimedStream {
@@ -57,12 +92,21 @@ impl Read for TimedStream {
 }
 
 fn response(stream: &mut TcpStream, status: &str, kind: &str, body: &str) -> io::Result<()> {
-    stream.set_write_timeout(Some(Duration::from_secs(2)))?;
-    write!(stream, "HTTP/1.1 {status}\r\nContent-Type: {kind}\r\nContent-Length: {}\r\nConnection: close\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\n\r\n{body}", body.len())?;
-    stream.flush()
+    response_with_window(stream, status, kind, body, None)
 }
 
-fn reject(stream: &mut TcpStream, error: &ReceiveError) {
+fn response_with_window(
+    stream: &mut TcpStream,
+    status: &str,
+    kind: &str,
+    body: &str,
+    remaining: Option<u64>,
+) -> io::Result<()> {
+    stream.set_write_timeout(Some(Duration::from_secs(2)))?;
+    upload::write_response(stream, status, kind, body, remaining)
+}
+
+fn reject(stream: &mut TcpStream, error: &ReceiveError, remaining: u64) {
     let (status, message) = match error {
         ReceiveError::TooLarge => (
             "413 Payload Too Large",
@@ -81,7 +125,8 @@ fn reject(stream: &mut TcpStream, error: &ReceiveError) {
             "Invalid or interrupted request; saved frame unchanged.",
         ),
     };
-    if let Err(error) = response(stream, status, "text/plain", message) {
+    if let Err(error) = response_with_window(stream, status, "text/plain", message, Some(remaining))
+    {
         log::warn!("upload rejection response could not be sent: {error}");
     }
 }
@@ -91,7 +136,7 @@ pub fn configure(
 ) -> Result<(), esp_idf_svc::sys::EspError> {
     let password = PASSWORD.filter(|value| upload::valid_wifi_password(value))
         .ok_or_else(|| {
-            log::error!("debug-upload requires HOF_WIFI_PASSWORD at build time: 8-63 ASCII characters; never log or commit it");
+            log::error!("upload requires HOF_WIFI_PASSWORD at build time: 8-63 ASCII characters; never log or commit it");
             esp_idf_svc::sys::EspError::from(esp_idf_svc::sys::ESP_ERR_INVALID_ARG).unwrap()
         })?;
     wifi.set_configuration(&Configuration::AccessPoint(AccessPointConfiguration {
@@ -107,9 +152,19 @@ pub fn configure(
 pub fn run(
     wifi: &mut BlockingWifi<EspWifi<'static>>,
     boot: Instant,
-) -> Result<Option<Received>, Box<dyn std::error::Error>> {
+    safety: &mut firmware::safety::SafetyGuard<crate::safety_nvs::NvsSafetyStore>,
+    schedule: &mut firmware::schedule::RefreshSchedule,
+) -> Result<(), Box<dyn std::error::Error>> {
     let awake_deadline = boot + upload::AWAKE_TIMEOUT;
-    let result = (|| -> Result<Option<Received>, Box<dyn std::error::Error>> {
+    let result = (|| -> Result<(), Box<dyn std::error::Error>> {
+        crate::set_work_phase(safety, firmware::safety::WorkPhase::Upload)?;
+        if Instant::now() >= awake_deadline {
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "awake deadline expired before AP startup",
+            )
+            .into());
+        }
         wifi.start()?;
         wifi.wait_netif_up()?;
         let address = wifi.wifi().ap_netif().get_ip_info()?.ip;
@@ -121,12 +176,12 @@ pub fn run(
         }
         let listener = TcpListener::bind(("0.0.0.0", 80))?;
         listener.set_nonblocking(true)?;
-        log::info!("UploadWindow: AP HOF-Frame ready; open http://{address}; WPA2; one client only; idle=300 s; panel OFF; sleep mocked");
-        let idle_deadline = Instant::now() + upload::IDLE_TIMEOUT;
+        log::info!("UploadWindow: AP HOF-Frame ready; open http://{address}; WPA2; one client only; idle=300 s; panel OFF");
+        let idle_deadline = (Instant::now() + upload::IDLE_TIMEOUT).min(awake_deadline);
         loop {
             if Instant::now() >= idle_deadline || Instant::now() >= awake_deadline {
                 log::info!("UploadWindow: idle deadline; no upload; saved frame and daily deadline unchanged");
-                return Ok(None);
+                return Ok(());
             }
             let (stream, _) = match listener.accept() {
                 Ok(client) => client,
@@ -152,7 +207,13 @@ pub fn run(
                 Ok(request) => request,
                 Err(error) => {
                     log::warn!("UploadWindow: headers rejected: {error:?}; closing this connection only; hotspot idle deadline unchanged");
-                    reject(&mut reader.get_mut().stream, &error);
+                    reject(
+                        &mut reader.get_mut().stream,
+                        &error,
+                        idle_deadline
+                            .saturating_duration_since(Instant::now())
+                            .as_secs(),
+                    );
                     continue;
                 }
             };
@@ -177,11 +238,8 @@ pub fn run(
                         "text/html; charset=utf-8",
                         &PAGE
                             .replace("__SECONDS__", &remaining.to_string())
-                            .replace("__DISPLAY_MODE__", if cfg!(feature = "debug-upload-display") {
-                                "A successful save triggers a REAL screen refresh. Keep bench power connected until completion; deep sleep stays mocked."
-                            } else {
-                                "Screen refresh stays mocked."
-                            }),
+                            .replace("__PROCESS_TIMEOUT_MS__", &upload::BROWSER_RESULT_TIMEOUT.as_millis().to_string())
+                            .replace("__DISPLAY_MODE__", "A successful save triggers a REAL screen refresh. Wi-Fi stays on for the final result, then closes six seconds after success. Keep stable power connected."),
                     ) {
                         log::warn!("UploadWindow: page response failed: {error}");
                     }
@@ -194,8 +252,9 @@ pub fn run(
                                 io::ErrorKind::TimedOut,
                                 "idle deadline",
                             )),
+                            0,
                         );
-                        return Ok(None);
+                        return Ok(());
                     }
                     log::info!("UploadWindow: transfer started; {body:?}, {metadata:?}; max=4194304 bytes, inactivity=120 s, absolute=120 s");
                     // Request framing/declared size was checked before allocating.
@@ -211,10 +270,11 @@ pub fn run(
                                 &mut reader.get_mut().stream,
                                 "503 Service Unavailable",
                                 "text/plain",
-                                "Not enough upload memory; saved frame unchanged.",
+                                "Not enough upload memory; saved frame unchanged. Further work is blocked; hotspot closing.",
                             ) {
                                 log::warn!("UploadWindow: allocation failure response failed: {response_error}");
                             }
+                            FreeRtos::delay_ms(upload::RESULT_GRACE.as_millis() as u32);
                             return Err(error.into());
                         }
                     };
@@ -227,8 +287,14 @@ pub fn run(
                         Ok(len) => len,
                         Err(error) => {
                             log::warn!("UploadWindow: receive failed: {error:?}");
-                            reject(&mut reader.get_mut().stream, &error);
-                            return Ok(None);
+                            reject(
+                                &mut reader.get_mut().stream,
+                                &error,
+                                idle_deadline
+                                    .saturating_duration_since(Instant::now())
+                                    .as_secs(),
+                            );
+                            continue;
                         }
                     };
                     if !upload::image_signature(&buffer.bytes_mut()[..len]) {
@@ -236,33 +302,113 @@ pub fn run(
                         reject(
                             &mut reader.get_mut().stream,
                             &ReceiveError::UnsupportedImage,
+                            idle_deadline
+                                .saturating_duration_since(Instant::now())
+                                .as_secs(),
                         );
-                        return Ok(None);
+                        continue;
                     }
-                    let receipt = if cfg!(feature = "debug-upload-display") {
-                        "Upload received. Wi-Fi is closing before decoding, saving, and REAL screen refresh. Receipt is not confirmation of save/display success; keep power connected and check serial logs for display test: SUCCESS."
-                    } else {
-                        "Upload received. Wi-Fi is closing before decoding and saving. This confirms receipt only, not successful save; check serial logs for SAVED or failure. Screen refresh remains mocked."
+                    log::info!("UploadWindow: RECEIVED {len} bytes; processing with AP ON; streaming progress and final result");
+                    let stream = &mut reader.get_mut().stream;
+                    stream.set_write_timeout(Some(Duration::from_secs(2)))?;
+                    let mut connected = match upload::start_progress(stream) {
+                        Ok(()) => true,
+                        Err(error) => {
+                            log::warn!("UploadWindow: progress response could not be started: {error}; continuing image work");
+                            false
+                        }
                     };
-                    response(
-                        &mut reader.get_mut().stream,
-                        "200 OK",
-                        "text/plain",
-                        receipt,
-                    )?;
-                    log::info!("UploadWindow: RECEIVED {len} bytes in PSRAM; receipt response sent; decode/commit follows radio shutdown; no panel refresh");
-                    // Allow the response to reach the client before radio teardown.
-                    FreeRtos::delay_ms(500);
-                    return Ok(Some(Received {
-                        buffer,
-                        len,
-                        metadata,
-                    }));
+                    let mut notify = |stage| {
+                        if connected {
+                            if let Err(error) =
+                                upload::write_progress(stream, ProgressEvent::Stage(stage))
+                            {
+                                log::warn!("UploadWindow: progress connection lost: {error}; continuing image work");
+                                connected = false;
+                            }
+                        }
+                    };
+                    notify(ProgressStage::Received);
+                    let outcome = crate::process_upload(
+                        Received {
+                            buffer,
+                            len,
+                            metadata,
+                        },
+                        awake_deadline,
+                        &mut notify,
+                        safety,
+                        schedule,
+                    );
+                    #[cfg(not(feature = "usb"))]
+                    if outcome.is_ok() {
+                        crate::update_retained_state(|state| {
+                            state.schedule = *schedule;
+                            state.refresh_in_progress = 0;
+                        });
+                    }
+                    let remaining = idle_deadline
+                        .saturating_duration_since(Instant::now())
+                        .as_secs();
+                    match outcome {
+                        Ok(message) => {
+                            if connected {
+                                if let Err(error) =
+                                    upload::write_progress(stream, ProgressEvent::Success(message))
+                                {
+                                    log::warn!("UploadWindow: work succeeded but final response could not be delivered: {error}");
+                                }
+                            }
+                            log::info!("UploadWindow: final success; closing AP after six-second result grace");
+                            FreeRtos::delay_ms(upload::RESULT_GRACE.as_millis() as u32);
+                            return Ok(());
+                        }
+                        Err(ProcessingError::Retry(message)) => {
+                            log::warn!("UploadWindow: processing rejected: {message}; retry window remaining={remaining} s");
+                            if connected {
+                                if let Err(error) = upload::write_progress(
+                                    stream,
+                                    ProgressEvent::Retry(remaining, &message),
+                                ) {
+                                    log::warn!("UploadWindow: failure response could not be delivered: {error}");
+                                }
+                            }
+                            crate::set_work_phase(safety, firmware::safety::WorkPhase::Upload)?;
+                        }
+                        Err(ProcessingError::Fatal(message)) => {
+                            log::error!("UploadWindow: processing safety fault: {message}");
+                            if connected {
+                                if let Err(error) = upload::write_progress(
+                                    stream,
+                                    ProgressEvent::Fatal(&format!(
+                                        "{message} Further work is blocked; hotspot closing."
+                                    )),
+                                ) {
+                                    log::warn!("UploadWindow: fatal response could not be delivered: {error}");
+                                }
+                            }
+                            FreeRtos::delay_ms(upload::RESULT_GRACE.as_millis() as u32);
+                            return Err(message.into());
+                        }
+                    }
                 }
             }
         }
     })();
+    let cleanup_phase = if result.is_ok() {
+        crate::set_work_phase(safety, firmware::safety::WorkPhase::RadioCleanup)
+    } else {
+        Ok(())
+    };
     let stopped = wifi.stop();
+    if let Err(error) = cleanup_phase {
+        if let Err(stop_error) = stopped {
+            log::error!(
+                "UploadWindow: diagnostic phase write and Wi-Fi shutdown both failed: {stop_error}"
+            );
+        }
+        return Err(error.into());
+    }
     match (result, stopped) {
         (Err(error), Err(stop_error)) => {
             log::error!("UploadWindow: Wi-Fi shutdown also failed: {stop_error:?}");
@@ -271,7 +417,8 @@ pub fn run(
         (Err(error), Ok(())) => Err(error),
         (Ok(_), Err(error)) => Err(error.into()),
         (Ok(received), Ok(())) => {
-            log::info!("UploadWindow: sockets closed; Wi-Fi OFF; USB remains connected");
+            crate::set_work_phase(safety, firmware::safety::WorkPhase::Idle)?;
+            log::info!("UploadWindow: sockets closed; Wi-Fi OFF");
             Ok(received)
         }
     }

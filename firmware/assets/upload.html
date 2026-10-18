@@ -6,43 +6,97 @@
 <style>
 body{font:18px system-ui;max-width:36rem;margin:2rem auto;padding:0 1rem}
 label{display:block;margin:1rem 0}button,select,input{font:inherit;max-width:100%}
-progress{width:100%}
+#sequence{margin:1.5rem 0}
+#stages{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:.5rem;list-style:none;padding:0;font-size:.85rem}
+#stages li{border-top:.6rem solid #ddd;padding-top:.5rem;color:#555}
+#stages li.active{border-color:#1769aa;color:#124d7c;font-weight:700}
+#stages li.done{border-color:#237a37;color:#185527}
+#stages li.failed{border-color:#b3261e;color:#b3261e}
+#stages span{display:block;font-weight:400;font-size:.75rem;margin-top:.25rem}
+#stages li.active span::after{content:'...'}
+@media(prefers-reduced-motion:no-preference){#stages li.active{animation:pulse 1.2s ease-in-out infinite}@keyframes pulse{50%{border-color:#8bbce2}}}
 </style>
 <h1>HOF-Frame</h1>
-<p><strong>Save test:</strong> the browser resizes your PNG/JPEG to the selected display
-resolution. After receipt, Wi-Fi closes and the board dithers and saves the image.
-__DISPLAY_MODE__ Check serial logs for the final result.</p>
+<p>The browser resizes your PNG/JPEG to the selected display resolution.
+Wi-Fi stays connected while the board decodes and saves your image.
+__DISPLAY_MODE__ This page reports the final result.</p>
 <p>The battery box is drawn over the photo at refresh time. It shows
 <strong>?%</strong> beside a battery icon until calibrated battery measurement is available.</p>
-<p id="status">No upload started: sleeping in __SECONDS__ seconds.</p>
+<section id="sequence" hidden aria-label="Image update progress">
+<div id="progress" role="progressbar" aria-label="Image update sequence" aria-valuemin="0" aria-valuemax="4" aria-valuenow="0">
+<ol id="stages">
+<li>1. Send image<span>Waiting</span></li>
+<li>2. Process image<span>Waiting</span></li>
+<li>3. Update display<span>Waiting</span></li>
+<li>4. Complete<span>Waiting</span></li>
+</ol>
+</div>
+</section>
+<p id="status" role="status" aria-live="polite">No upload started. Hotspot closes in __SECONDS__ seconds.</p>
 <form id="form">
 <label>Layout <select id="orientation"><option value="portrait">Portrait</option><option value="landscape">Landscape</option></select></label>
 <label>Image sizing <select id="sizing"><option value="stretch">Stretch to fill (changes proportions)</option><option value="fit">Fit whole image (white borders)</option></select></label>
 <label>Battery indicator <select id="corner"><option value="top-right">Top right</option><option value="top-left">Top left</option><option value="bottom-left">Bottom left</option><option value="bottom-right">Bottom right</option></select></label>
-<label>PNG or JPEG, at most 4 MiB <input id="file" type="file" accept="image/png,image/jpeg" required></label>
+<label>PNG or JPEG, at most 7 MB (7,000,000 bytes) <input id="file" type="file" accept="image/png,image/jpeg" required></label>
+<p>The browser resizes your photo before sending it. The resized PNG must fit
+within the board's 4 MiB upload limit.</p>
 <button id="send">Resize and upload</button>
 </form>
-<progress id="progress" hidden max="100" value="0"></progress>
 <script>
 const status=document.getElementById('status'),form=document.getElementById('form');
-const deadline=performance.now()+__SECONDS__*1000;
-const countdown=setInterval(()=>{
+const progress=document.getElementById('progress'),stages=[...document.querySelectorAll('#stages li')];
+let activeStage=0;
+function showProgress(done,active,detail=''){
+  document.getElementById('sequence').hidden=false;
+  activeStage=active;
+  progress.setAttribute('aria-valuenow',done);
+  progress.setAttribute('aria-valuetext',`${done} of 4 stages complete${detail?`: ${detail}`:''}`);
+  stages.forEach((stage,index)=>{
+    stage.className=index<done?'done':index===active?'active':'';
+    stage.querySelector('span').textContent=index<done?'Done':index===active?detail:'Waiting';
+    if(index===active)stage.setAttribute('aria-current','step');
+    else stage.removeAttribute('aria-current');
+  });
+}
+function failProgress(){
+  if(activeStage!==null){
+    stages[activeStage].className='failed';
+    stages[activeStage].querySelector('span').textContent='Not completed';
+    stages[activeStage].removeAttribute('aria-current');
+  }
+}
+let deadline=performance.now()+__SECONDS__*1000;
+const controls=form.querySelectorAll('input,select,button');
+let countdown;
+function startCountdown(message='No upload started.'){
+  clearInterval(countdown);
+  const tick=()=>{
   const seconds=Math.max(0,Math.ceil((deadline-performance.now())/1000));
-  status.textContent=`No upload started: sleeping in ${seconds} seconds (sleep mocked; hotspot closes).`;
+  status.textContent=`${message} Hotspot closes in ${seconds} seconds.`;
   if(!seconds){clearInterval(countdown);document.getElementById('send').disabled=true;}
-},250);
+  };
+  tick();
+  if(performance.now()<deadline)countdown=setInterval(tick,250);
+}
+function retry(message,seconds){
+  deadline=performance.now()+Math.max(0,seconds)*1000;
+  controls.forEach(control=>{control.disabled=false;});
+  document.getElementById('send').disabled=seconds<=0;
+  startCountdown(message);
+}
+startCountdown();
 form.addEventListener('submit',async event=>{
   event.preventDefault();
   const file=document.getElementById('file').files[0];
-  if(!file||file.size>4194304||!['image/png','image/jpeg'].includes(file.type)){
-    status.textContent='Choose a PNG/JPEG no larger than 4 MiB.';return;
+  if(!file||file.size>7000000||!['image/png','image/jpeg'].includes(file.type)){
+    status.textContent='Choose a PNG/JPEG no larger than 7 MB (7,000,000 bytes).';return;
   }
   const orientation=document.getElementById('orientation').value;
   const sizing=document.getElementById('sizing').value;
   const corner=document.getElementById('corner').value;
-  const controls=form.querySelectorAll('input,select,button');
   controls.forEach(control=>{control.disabled=true;});
   clearInterval(countdown);document.getElementById('send').disabled=true;
+  showProgress(0,0,'Resizing');
   status.textContent='Resizing locally; the hotspot idle deadline still applies.';
   let resized;
   try {
@@ -66,27 +120,96 @@ form.addEventListener('submit',async event=>{
       if(!resized||resized.size>4194304)throw new Error('Resized PNG exceeds 4 MiB; try a simpler image.');
     } finally {image.close();}
   } catch(error) {
+    failProgress();
     status.textContent=`Resize failed: ${error.message}`;
-    controls.forEach(control=>{control.disabled=false;});
-    document.getElementById('send').disabled=performance.now()>=deadline;
+    retry(`Resize failed: ${error.message}`,Math.max(0,(deadline-performance.now())/1000));
     return;
   }
   if(performance.now()>=deadline){
+    failProgress();
     status.textContent='Hotspot idle deadline elapsed while resizing. Start a new upload window.';
     return;
   }
-  const progress=document.getElementById('progress');progress.hidden=false;
+  showProgress(0,0,'Sending');
   const xhr=new XMLHttpRequest();
   xhr.open('POST',`/upload?orientation=${orientation}&corner=${corner}`);
   xhr.setRequestHeader('Content-Type','image/png');
-  xhr.timeout=125000;
+  xhr.timeout=__PROCESS_TIMEOUT_MS__;
   xhr.upload.onprogress=e=>{
-    if(e.lengthComputable)progress.value=e.loaded/e.total*100;
-    status.textContent='Uploading; transfer deadlines now apply.';
+    showProgress(0,0,e.lengthComputable?`Sending ${Math.round(e.loaded/e.total*100)}%`:'Sending');
+    status.textContent=e.lengthComputable?`Uploading: ${Math.round(e.loaded/e.total*100)}%.`:'Uploading...';
   };
-  xhr.onload=()=>{status.textContent=xhr.responseText||`Request ended with HTTP ${xhr.status}.`;};
-  xhr.onerror=()=>{status.textContent='Connection closed; receipt/save not confirmed. Check serial logs.';};
-  xhr.ontimeout=()=>{status.textContent='Upload timed out; receipt not confirmed.';};
+  xhr.upload.onload=()=>{
+    showProgress(0,0,'Waiting for board');
+    status.textContent='Image sent; waiting for the board to confirm receipt. Keep power and Wi-Fi connected.';
+  };
+  let offset=0,pending='',terminal=false,protocolFailed=false;
+  function unknown(message){
+    failProgress();
+    status.textContent=`${message} Final result is unknown. Keep power connected; check the screen or serial logs before retrying.`;
+  }
+  function success(message){
+      showProgress(4,null);
+      const closes=performance.now()+6000;
+      let timer;
+      const tick=()=>{
+        const seconds=Math.max(0,Math.ceil((closes-performance.now())/1000));
+        status.textContent=`${message} ${seconds?`Disconnecting Wi-Fi in about ${seconds} seconds.`:'Hotspot is closing. You can reconnect to your normal Wi-Fi.'}`;
+        if(!seconds)clearInterval(timer);
+      };
+      tick();
+      timer=setInterval(tick,250);
+  }
+  function consumeProgress(){
+    if(protocolFailed)return;
+    pending+=xhr.responseText.slice(offset);
+    offset=xhr.responseText.length;
+    let end;
+    while((end=pending.indexOf('\n'))!==-1){
+      const line=pending.slice(0,end);pending=pending.slice(end+1);
+      if(!line)continue;
+      if(terminal){protocolFailed=true;unknown('Unexpected data after final result.');return;}
+      const [event,...fields]=line.split('\t');
+      if(event==='received'&&fields.length===0){
+        showProgress(1,1,'Processing');
+        status.textContent='Image received. Decoding, converting colors, and saving...';
+      }else if(event==='processed'&&fields.length===0){
+        showProgress(2,2,'Preparing display');
+        status.textContent='Image processed and saved. Preparing the display...';
+      }else if(event==='displaying'&&fields.length===0){
+        showProgress(2,2,'Updating');
+        status.textContent='Updating the display. Keep power and Wi-Fi connected; this can take a while.';
+      }else if(event==='displayed'&&fields.length===0){
+        showProgress(3,3,'Finalizing');
+        status.textContent='Display updated and panel power off. Finalizing...';
+      }else if(event==='success'&&fields.length===1){
+        terminal=true;success(fields[0]);
+      }else if(event==='retry'&&fields.length===2&&/^\d+$/.test(fields[0])){
+        terminal=true;failProgress();retry(fields[1],Number(fields[0]));
+      }else if(event==='fatal'&&fields.length===1){
+        terminal=true;failProgress();status.textContent=fields[0];
+      }else{
+        protocolFailed=true;unknown('Invalid progress response.');return;
+      }
+    }
+  }
+  xhr.onprogress=()=>{
+    if(xhr.status===200)consumeProgress();
+  };
+  xhr.onload=()=>{
+    if(xhr.status===200){
+      consumeProgress();
+      if(!protocolFailed&&(!terminal||pending))unknown('Connection ended without a complete final result.');
+    }else{
+      failProgress();
+      const message=xhr.responseText||`Request ended with HTTP ${xhr.status}.`;
+      const remaining=xhr.getResponseHeader('X-Window-Seconds');
+      if(remaining!==null&&Number.isFinite(Number(remaining)))retry(message,Number(remaining));
+      else status.textContent=message;
+    }
+  };
+  xhr.onerror=()=>{if(!terminal)unknown('Connection lost.');};
+  xhr.ontimeout=()=>{if(!terminal)unknown('Request timed out.');};
   xhr.send(resized);
 });
 </script>

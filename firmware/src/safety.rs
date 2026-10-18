@@ -5,6 +5,89 @@ pub enum SafetyState {
     Latched,
 }
 
+#[repr(u8)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WorkPhase {
+    Idle = 0,
+    Setup = 1,
+    Upload = 2,
+    Decode = 3,
+    Save = 4,
+    Display = 5,
+    PanelCleanup = 6,
+    SafetyCleanup = 7,
+    RadioCleanup = 8,
+    LoadFrame = 9,
+    Unknown = 255,
+}
+
+#[repr(u8)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FaultReason {
+    None = 0,
+    Interrupted = 1,
+    Brownout = 2,
+    InvalidState = 3,
+    RuntimeFailure = 4,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Diagnostic {
+    pub phase: WorkPhase,
+    pub reason: FaultReason,
+}
+
+impl Diagnostic {
+    pub fn record(self) -> u32 {
+        0xD100_0000 | ((self.phase as u32) << 8) | self.reason as u32
+    }
+
+    pub fn from_record(value: u32) -> Option<Self> {
+        if value & 0xFFFF_0000 != 0xD100_0000 {
+            return None;
+        }
+        let phase = match (value >> 8) & 255 {
+            0 => WorkPhase::Idle,
+            1 => WorkPhase::Setup,
+            2 => WorkPhase::Upload,
+            3 => WorkPhase::Decode,
+            4 => WorkPhase::Save,
+            5 => WorkPhase::Display,
+            6 => WorkPhase::PanelCleanup,
+            7 => WorkPhase::SafetyCleanup,
+            8 => WorkPhase::RadioCleanup,
+            9 => WorkPhase::LoadFrame,
+            255 => WorkPhase::Unknown,
+            _ => return None,
+        };
+        let reason = match value & 255 {
+            0 => FaultReason::None,
+            1 => FaultReason::Interrupted,
+            2 => FaultReason::Brownout,
+            3 => FaultReason::InvalidState,
+            4 => FaultReason::RuntimeFailure,
+            _ => return None,
+        };
+        Some(Self { phase, reason })
+    }
+}
+
+pub trait DiagnosticStore: SafetyStore {
+    fn phase(&mut self, phase: WorkPhase) -> Result<(), Self::Error>;
+}
+
+pub fn boot_fault(previous_state: Option<u8>, brownout: bool) -> Option<FaultReason> {
+    if brownout {
+        Some(FaultReason::Brownout)
+    } else {
+        match previous_state {
+            Some(0xA1) => Some(FaultReason::Interrupted),
+            None | Some(0xA0) | Some(0xA2) => None,
+            Some(_) => Some(FaultReason::InvalidState),
+        }
+    }
+}
+
 pub trait SafetyStore {
     type Error;
     fn read(&mut self) -> Result<Option<u8>, Self::Error>;
@@ -102,6 +185,16 @@ impl<S: SafetyStore> SafetyGuard<S> {
     }
 }
 
+impl<S: DiagnosticStore> SafetyGuard<S> {
+    pub fn set_phase(&mut self, phase: WorkPhase) -> Result<(), SafetyError<S::Error>> {
+        if let Err(error) = self.store.phase(phase) {
+            self.state = SafetyState::Latched;
+            return Err(SafetyError::Storage(error));
+        }
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -111,6 +204,7 @@ mod tests {
         value: Option<u8>,
         writes: usize,
         fail: bool,
+        phase: Option<WorkPhase>,
     }
 
     impl SafetyStore for Store {
@@ -130,6 +224,93 @@ mod tests {
             self.writes += 1;
             Ok(())
         }
+    }
+
+    impl DiagnosticStore for Store {
+        fn phase(&mut self, phase: WorkPhase) -> Result<(), Self::Error> {
+            if self.fail {
+                return Err("diagnostic write");
+            }
+            self.phase = Some(phase);
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn diagnostic_record_roundtrips_every_phase_and_reason() {
+        for phase in [
+            WorkPhase::Idle,
+            WorkPhase::Setup,
+            WorkPhase::Upload,
+            WorkPhase::Decode,
+            WorkPhase::Save,
+            WorkPhase::Display,
+            WorkPhase::PanelCleanup,
+            WorkPhase::SafetyCleanup,
+            WorkPhase::RadioCleanup,
+            WorkPhase::LoadFrame,
+            WorkPhase::Unknown,
+        ] {
+            for reason in [
+                FaultReason::None,
+                FaultReason::Interrupted,
+                FaultReason::Brownout,
+                FaultReason::InvalidState,
+                FaultReason::RuntimeFailure,
+            ] {
+                let value = Diagnostic { phase, reason };
+                assert_eq!(Diagnostic::from_record(value.record()), Some(value));
+            }
+        }
+        for invalid in [0, 0xD200_0000, 0xD101_0000, 0xD100_0A00, 0xD100_0005] {
+            assert_eq!(Diagnostic::from_record(invalid), None);
+        }
+    }
+
+    #[test]
+    fn boot_diagnostics_distinguish_new_faults_from_existing_latch() {
+        assert_eq!(boot_fault(None, false), None);
+        assert_eq!(boot_fault(Some(0xA0), false), None);
+        assert_eq!(boot_fault(Some(0xA2), false), None);
+        assert_eq!(
+            boot_fault(Some(0xA1), false),
+            Some(FaultReason::Interrupted)
+        );
+        assert_eq!(
+            boot_fault(Some(0x42), false),
+            Some(FaultReason::InvalidState)
+        );
+        for state in [None, Some(0xA0), Some(0xA1), Some(0xA2), Some(0x42)] {
+            assert_eq!(boot_fault(state, true), Some(FaultReason::Brownout));
+        }
+    }
+
+    #[test]
+    fn phase_tracking_does_not_complete_or_clear_work() {
+        let mut guard = SafetyGuard::open(Store::default(), false).unwrap();
+        guard.begin_work().unwrap();
+        guard.set_phase(WorkPhase::Save).unwrap();
+        assert_eq!(guard.store.phase, Some(WorkPhase::Save));
+        assert_eq!(guard.state(), SafetyState::Working);
+        assert_eq!(guard.store.value, Some(0xA1));
+        guard.latch().unwrap();
+        guard.set_phase(WorkPhase::RadioCleanup).unwrap();
+        assert_eq!(guard.state(), SafetyState::Latched);
+        assert_eq!(guard.store.value, Some(0xA2));
+    }
+
+    #[test]
+    fn diagnostic_write_failure_blocks_current_work() {
+        let mut guard = SafetyGuard::open(Store::default(), false).unwrap();
+        guard.begin_work().unwrap();
+        guard.store.fail = true;
+        assert_eq!(
+            guard.set_phase(WorkPhase::Display),
+            Err(SafetyError::Storage("diagnostic write"))
+        );
+        assert_eq!(guard.state(), SafetyState::Latched);
+        assert_eq!(guard.store.value, Some(0xA1));
+        assert_eq!(guard.finish_work(), Err(SafetyError::Blocked));
     }
 
     #[test]

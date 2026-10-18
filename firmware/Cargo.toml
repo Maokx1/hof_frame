@@ -8,9 +8,7 @@ rust-version = "1.82"
 default-run = "firmware"
 
 [features]
-debug-upload = ["dep:png"]
-debug-upload-display = ["debug-upload"]
-debug-battery-preview = ["debug-upload-display"]
+usb = []
 
 [[bin]]
 name = "firmware"
@@ -30,7 +28,7 @@ esp-idf-svc = { git = "https://github.com/esp-rs/esp-idf-svc.git" }
 [dependencies]
 log = "0.4"
 esp-idf-svc = { version = "0.52.1" }
-png = { version = "0.17", optional = true }
+png = "0.18.1"
 fontdue = { version = "0.9", default-features = false, features = ["std"] }
 
 [build-dependencies]

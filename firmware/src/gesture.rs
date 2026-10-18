@@ -2,7 +2,36 @@ use std::time::{Duration, Instant};
 
 pub const BUTTON_DEBOUNCE: Duration = Duration::from_millis(50);
 pub const GESTURE_WINDOW: Duration = Duration::from_secs(3);
-pub const LONG_HOLD: Duration = Duration::from_secs(5);
+pub const LONG_HOLD: Duration = Duration::from_secs(3);
+
+pub struct FaultSwitch {
+    stable_pressed: bool,
+    candidate_pressed: bool,
+    candidate_since: Instant,
+}
+
+impl FaultSwitch {
+    pub fn new(now: Instant, initially_pressed: bool) -> Self {
+        Self {
+            stable_pressed: initially_pressed,
+            candidate_pressed: initially_pressed,
+            candidate_since: now,
+        }
+    }
+
+    pub fn sample(&mut self, now: Instant, pressed: bool) -> bool {
+        if pressed != self.candidate_pressed {
+            self.candidate_pressed = pressed;
+            self.candidate_since = now;
+        } else if pressed != self.stable_pressed
+            && now.duration_since(self.candidate_since) >= BUTTON_DEBOUNCE
+        {
+            self.stable_pressed = pressed;
+            return pressed;
+        }
+        false
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Gesture {
@@ -75,7 +104,7 @@ impl GestureClassifier {
 
 #[cfg(test)]
 mod tests {
-    use super::{Gesture, GestureClassifier};
+    use super::{FaultSwitch, Gesture, GestureClassifier};
     use std::time::{Duration, Instant};
 
     fn at(wake_at: Instant, millis: u64) -> Instant {
@@ -83,13 +112,48 @@ mod tests {
     }
 
     #[test]
-    fn waking_press_held_for_five_seconds_requests_upload() {
+    fn fault_switch_debounces_press_and_requires_release_before_next_toggle() {
+        let now = Instant::now();
+        let mut switch = FaultSwitch::new(now, false);
+        for (millis, pressed, toggled) in [
+            (0, true, false),
+            (10, false, false),
+            (20, true, false),
+            (69, true, false),
+            (70, true, true),
+            (5000, true, false),
+            (6000, false, false),
+            (6050, false, false),
+            (7000, true, false),
+            (7050, true, true),
+        ] {
+            assert_eq!(switch.sample(at(now, millis), pressed), toggled);
+        }
+    }
+
+    #[test]
+    fn fault_switch_held_at_boot_does_not_toggle() {
+        let now = Instant::now();
+        let mut switch = FaultSwitch::new(now, true);
+        for (millis, pressed, toggled) in [
+            (5000, true, false),
+            (6000, false, false),
+            (6050, false, false),
+            (7000, true, false),
+            (7050, true, true),
+        ] {
+            assert_eq!(switch.sample(at(now, millis), pressed), toggled);
+        }
+    }
+
+    #[test]
+    fn waking_press_held_for_three_seconds_requests_upload() {
         let wake_at = Instant::now();
         let mut classifier = GestureClassifier::new(wake_at, true);
 
-        assert_eq!(classifier.sample(at(wake_at, 4_999), true), None);
+        assert_eq!(classifier.sample(at(wake_at, 2_999), true), None);
         assert_eq!(
-            classifier.sample(at(wake_at, 5_000), true),
+            classifier.sample(at(wake_at, 3_000), true),
             Some(Gesture::Upload)
         );
     }
@@ -167,7 +231,7 @@ mod tests {
     }
 
     #[test]
-    fn waking_press_released_before_five_seconds_does_not_request_upload() {
+    fn waking_press_released_before_three_seconds_does_not_request_upload() {
         let wake_at = Instant::now();
         let mut classifier = GestureClassifier::new(wake_at, true);
 
@@ -184,10 +248,10 @@ mod tests {
         let wake_at = Instant::now();
         let mut classifier = GestureClassifier::new(wake_at, true);
 
-        assert_eq!(classifier.sample(at(wake_at, 4_990), false), None);
-        assert_eq!(classifier.sample(at(wake_at, 5_000), false), None);
+        assert_eq!(classifier.sample(at(wake_at, 2_990), false), None);
+        assert_eq!(classifier.sample(at(wake_at, 3_000), false), None);
         assert_eq!(
-            classifier.sample(at(wake_at, 5_040), false),
+            classifier.sample(at(wake_at, 3_040), false),
             Some(Gesture::Sleep)
         );
     }
@@ -197,10 +261,10 @@ mod tests {
         let wake_at = Instant::now();
         let mut classifier = GestureClassifier::new(wake_at, true);
 
-        assert_eq!(classifier.sample(at(wake_at, 4_990), false), None);
-        assert_eq!(classifier.sample(at(wake_at, 5_000), false), None);
+        assert_eq!(classifier.sample(at(wake_at, 2_990), false), None);
+        assert_eq!(classifier.sample(at(wake_at, 3_000), false), None);
         assert_eq!(
-            classifier.sample(at(wake_at, 5_010), true),
+            classifier.sample(at(wake_at, 3_010), true),
             Some(Gesture::Upload)
         );
     }

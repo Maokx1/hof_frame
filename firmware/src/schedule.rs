@@ -1,5 +1,6 @@
 pub const DAILY_INTERVAL_US: u64 = 24 * 60 * 60 * 1_000_000;
 pub const MANUAL_LIMIT_US: u64 = 60 * 60 * 1_000_000;
+pub const USB_INTERVAL_US: u64 = 60 * 1_000_000;
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
@@ -70,6 +71,22 @@ mod tests {
         assert_eq!(MANUAL_LIMIT_US, 3_600_000_000);
     }
 
+    #[test]
+    fn usb_timer_waits_sixty_seconds_after_completion() {
+        assert_eq!(USB_INTERVAL_US, 60_000_000);
+        let mut schedule = RefreshSchedule::new(0);
+        assert!(!schedule.due(USB_INTERVAL_US - 1, USB_INTERVAL_US));
+        assert!(schedule.due(USB_INTERVAL_US, USB_INTERVAL_US));
+        let completed = 150_000_000;
+        schedule.refresh_succeeded(completed, false);
+        assert!(!schedule.due(completed + USB_INTERVAL_US - 1, USB_INTERVAL_US));
+        assert!(schedule.due(completed + USB_INTERVAL_US, USB_INTERVAL_US));
+        assert!(schedule.manual_allowed(completed, MANUAL_LIMIT_US));
+        schedule.refresh_succeeded(completed + 1, true);
+        schedule.refresh_succeeded(completed + 2, false);
+        assert!(!schedule.manual_allowed(completed + MANUAL_LIMIT_US, MANUAL_LIMIT_US));
+        assert!(schedule.manual_allowed(completed + 1 + MANUAL_LIMIT_US, MANUAL_LIMIT_US));
+    }
     #[test]
     fn early_wakes_leave_original_deadline_unchanged() {
         let schedule = RefreshSchedule::new(100);
@@ -189,5 +206,23 @@ mod tests {
         assert_eq!(schedule.deadline_us(100), 110);
         assert!(schedule.cooling_down(20));
         assert!(schedule.manual_allowed(20, 50));
+    }
+
+    #[test]
+    fn production_upload_completion_preserves_manual_limit_across_retention() {
+        let second = 1_000_000;
+        let mut schedule = RefreshSchedule::new(0);
+        schedule.refresh_succeeded(10 * second, true);
+        schedule.refresh_succeeded(300 * second, false);
+        let retained = schedule;
+        assert_eq!(
+            retained.deadline_us(DAILY_INTERVAL_US),
+            300 * second + DAILY_INTERVAL_US
+        );
+        assert!(!retained.manual_allowed(10 * second + MANUAL_LIMIT_US - 1, MANUAL_LIMIT_US));
+        assert!(retained.manual_allowed(10 * second + MANUAL_LIMIT_US, MANUAL_LIMIT_US));
+        let mut first_upload = RefreshSchedule::new(0);
+        first_upload.refresh_succeeded(300 * second, false);
+        assert!(first_upload.manual_allowed(300 * second, MANUAL_LIMIT_US));
     }
 }

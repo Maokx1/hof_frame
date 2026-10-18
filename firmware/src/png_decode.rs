@@ -46,6 +46,15 @@ pub fn decode(
 mod tests {
     use super::*;
 
+    #[test]
+    fn qualification_signature_only_upload_is_rejected_before_pixel_conversion() {
+        let encoded = b"\x89PNG\r\n\x1a\n";
+        assert!(crate::upload::image_signature(encoded));
+        let mut packed = vec![0x11; frame::FRAME_BYTES];
+        assert!(decode(encoded, frame::Metadata::default(), &mut packed, || Ok(())).is_err());
+        assert!(packed.iter().all(|byte| *byte == 0x11));
+    }
+
     fn png(
         width: u32,
         height: u32,

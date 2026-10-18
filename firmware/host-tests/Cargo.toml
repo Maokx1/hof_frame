@@ -6,12 +6,8 @@ edition = "2021"
 [lib]
 path = "../src/lib.rs"
 
-[features]
-default = ["debug-upload"]
-debug-upload = ["dep:png"]
-
 [dependencies]
-png = { version = "0.17", optional = true }
+png = "0.18.1"
 fontdue = { version = "0.9", default-features = false, features = ["std"] }
 
 [workspace]
