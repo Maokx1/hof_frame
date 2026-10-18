@@ -157,15 +157,9 @@ arms only the RTC timer; a later wake rechecks button release.
    `192.168.4.1/24` subnet; the ready log checks the actual interface address.
 3. Select portrait (1200 x 1600) or landscape (1600 x 1200), Stretch or Fit,
    and the battery-box corner. Choose PNG/JPEG up to **7 MB (7,000,000 bytes)**.
-4. The browser normalizes to display-sized PNG, also limited to 4 MiB.
+4. The browser normalizes to display-sized PNG, also limited to
+   **7 MB (7,000,000 bytes)**.
    Stretch fills the layout; Fit preserves the photo with white borders.
-
-The original-photo limit is browser-side only. The device retains the
-4 MiB encoded-body limit: 7,000,000 encoded bytes plus a 960,000-byte candidate
-and 256 KiB decoder workspace leave only 166,464 bytes of the 8 MiB PSRAM
-before other allocations. A 7 MiB body exceeds that budget outright. Supporting
-larger device bodies safely requires a different buffering/decoding design,
-not just increasing the receiver constant.
 5. The bar appears immediately: **Send image -> Process image -> Update
    display -> Complete**. It covers local resize/upload, verified processing
    and save, actual panel refresh, then cleanup.
@@ -197,7 +191,8 @@ Named deadlines live in [upload.rs](src/upload.rs): idle 300 s, header 10 s,
 transfer inactivity/absolute 120 s each, awake budget 600 s. Retries and page
 loads never extend the original idle window. Accepted bodies can finish after
 idle expiry under their transfer/global bounds. Headers/trailers are capped
-at 8 KiB, chunk overhead at 128 KiB, and cumulative body size at 4 MiB.
+at 8 KiB, chunk overhead at 128 KiB, and cumulative body size at
+7 MB (7,000,000 bytes, not 7 MiB).
 Malformed framing, conflicting lengths, multipart, and `Expect: 100-continue`
 are unsupported and explicitly rejected.
 
@@ -214,11 +209,23 @@ APNG, wrong dimensions, corrupt and interlaced PNGs are rejected before commit.
 PNG tracked allocations are capped at 128 KiB, not including all inflater
 workspace. No full RGB image is allocated on device.
 
+Uploads stream through a 4 KiB transfer buffer into the temporary `upload`
+flash partition. Sectors are erased on demand and decoding reads the completed
+body through a separate 4 KiB buffered, seekable reader. The encoded body is
+never allocated in PSRAM; only the 960,000-byte candidate and decoder workspace
+need image-processing RAM. Interrupted or invalid staging is never used as a
+saved frame, and retries overwrite it from offset zero. Temporary upload bytes
+remain in flash until overwritten; they are not a second saved photo or
+securely erased after use. Flash erase/write/read failures are explicit.
+The 120-second transfer deadline now includes staging erase/write time;
+maximum-size throughput and flash endurance still need board qualification.
+
 Octal PSRAM is 8 MiB at 40 MHz. Ordinary large malloc/Vec allocations prefer
 PSRAM; 32 KiB internal memory is reserved for DMA/internal requests. The startup
 check verifies physical size, writes/reads every byte of a 4 MiB allocation,
 and verifies a Rust Vec growing 128 -> 256 KiB while input and a 960,000-byte
-candidate remain allocated. It yields every 64 KiB; measured runtime is about
+candidate remain allocated as a conservative memory stress test, not as the
+upload buffering design. It yields every 64 KiB; measured runtime is about
 1.6 seconds, down from roughly 20 seconds. USB runs it at startup; production
 runs it before upload AP setup, not on every timer wake.
 
@@ -228,9 +235,17 @@ runs it before upload AP setup, not on every timer wake.
 | --- | --- | --- |
 | NVS | `0x9000` | `0x6000` |
 | PHY | `0xF000` | `0x1000` |
-| App | `0x10000` | `0x9F0000` |
-| Reserved upload (currently unwritten) | `0xA00000` | `0x400000` |
+| App | `0x10000` | `0x6F0000` |
+| Temporary upload staging | `0x700000` | `0x700000` |
 | Frames | `0xE00000` | `0x200000` |
+
+**Upgrade requirement:** reflash the firmware **and partition table** using
+the updated [partitions.csv](partitions.csv), not an application-only update.
+The former 4 MiB upload partition is rejected as too small. The application
+partition is now 7,274,496 bytes; staging has 7 MiB of space but accepts at most
+7,000,000 encoded bytes. NVS and saved-frame offsets are unchanged; do not erase
+the whole chip if retaining those records. Qualification on the physical board
+is still required after this layout change.
 
 No OTA partition. Two 1 MiB slots contain 960,000 packed pixel bytes each,
 with a 36-byte header and payload offset 4096. CRCs, palette/geometry validation,

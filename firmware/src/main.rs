@@ -5,6 +5,7 @@ mod frame_flash;
 mod image_decode;
 mod psram;
 mod safety_nvs;
+mod upload_flash;
 mod upload_wifi;
 
 use std::time::{Duration, Instant};
@@ -344,7 +345,7 @@ fn safety_storage_fault(error: impl std::fmt::Debug) -> ! {
 }
 
 fn process_upload(
-    mut received: upload_wifi::Received,
+    received: upload_wifi::Received,
     deadline: Instant,
     progress: &mut dyn FnMut(firmware::upload::ProgressStage),
     safety: &mut SafetyGuard<safety_nvs::NvsSafetyStore>,
@@ -354,12 +355,12 @@ fn process_upload(
     use upload_wifi::ProcessingError;
 
     let saved = image_decode::save(
-        &received.buffer.bytes_mut()[..received.len],
+        received.buffer.reader(deadline),
+        received.len,
         received.metadata,
         deadline,
         safety,
     );
-    drop(received);
     match saved {
         Ok(()) => {}
         Err(image_decode::PipelineError::Rejected(error)) => {

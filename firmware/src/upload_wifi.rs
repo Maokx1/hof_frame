@@ -8,14 +8,14 @@ use esp_idf_svc::wifi::{
 };
 use firmware::upload::{self, ProgressEvent, ProgressStage, ReceiveError, Request};
 
-use crate::psram::PsramBuffer;
+use crate::upload_flash::FlashUpload;
 
 const PASSWORD: Option<&str> = option_env!("HOF_WIFI_PASSWORD");
 const PAGE: &str = include_str!("../assets/upload.html");
 pub const AP_ADDRESS: std::net::Ipv4Addr = std::net::Ipv4Addr::new(192, 168, 4, 1);
 
 pub struct Received {
-    pub buffer: PsramBuffer,
+    pub buffer: FlashUpload,
     pub len: usize,
     pub metadata: firmware::frame::Metadata,
 }
@@ -110,16 +110,20 @@ fn reject(stream: &mut TcpStream, error: &ReceiveError, remaining: u64) {
     let (status, message) = match error {
         ReceiveError::TooLarge => (
             "413 Payload Too Large",
-            "Upload exceeds 4 MiB; saved frame unchanged.",
+            "Upload exceeds 7 MB (7,000,000 bytes); saved frame unchanged.",
         ),
         ReceiveError::UnsupportedImage => (
             "415 Unsupported Media Type",
             "Only PNG/JPEG accepted; saved frame unchanged.",
         ),
-        ReceiveError::Io(error) if error.kind() == io::ErrorKind::TimedOut => (
-            "408 Request Timeout",
-            "Upload deadline exceeded; saved frame unchanged.",
-        ),
+        ReceiveError::Io(error) | ReceiveError::Storage(error)
+            if error.kind() == io::ErrorKind::TimedOut =>
+        {
+            (
+                "408 Request Timeout",
+                "Upload deadline exceeded; saved frame unchanged.",
+            )
+        }
         _ => (
             "400 Bad Request",
             "Invalid or interrupted request; saved frame unchanged.",
@@ -264,35 +268,51 @@ pub fn run(
                         );
                         return Ok(());
                     }
-                    log::info!("UploadWindow: transfer started; {body:?}, {metadata:?}; max=4194304 bytes, inactivity=120 s, absolute=120 s");
-                    // Request framing/declared size was checked before allocating.
-                    let capacity = match body {
-                        upload::BodyLength::Known(len) => len.max(1),
-                        upload::BodyLength::Chunked => upload::MAX_UPLOAD_BYTES,
-                    };
+                    log::info!("UploadWindow: transfer started; {body:?}, {metadata:?}; max=7000000 bytes, flash staging, inactivity=120 s, absolute=120 s");
                     let transfer_started = Instant::now();
-                    let mut buffer = match PsramBuffer::new(capacity) {
+                    let transfer_deadline =
+                        (transfer_started + upload::TRANSFER_TIMEOUT).min(awake_deadline);
+                    let mut buffer = match FlashUpload::open(transfer_deadline) {
                         Ok(buffer) => buffer,
                         Err(error) => {
                             if let Err(response_error) = response(
                                 &mut reader.get_mut().stream,
                                 "503 Service Unavailable",
                                 "text/plain",
-                                "Not enough upload memory; saved frame unchanged. Further work is blocked; hotspot closing.",
+                                "Upload storage unavailable; saved frame unchanged. Further work is blocked; hotspot closing.",
                             ) {
-                                log::warn!("UploadWindow: allocation failure response failed: {response_error}");
+                                log::warn!("UploadWindow: storage failure response failed: {response_error}");
                             }
                             FreeRtos::delay_ms(upload::RESULT_GRACE.as_millis() as u32);
                             return Err(error.into());
                         }
                     };
                     let timed = reader.get_mut();
-                    timed.deadline =
-                        (transfer_started + upload::TRANSFER_TIMEOUT).min(awake_deadline);
+                    timed.deadline = transfer_deadline;
                     timed.inactivity = upload::INACTIVITY_TIMEOUT;
                     timed.last_data = Instant::now();
-                    let len = match upload::receive(&mut reader, body, buffer.bytes_mut()) {
+                    let len = match upload::receive_to(
+                        &mut reader,
+                        body,
+                        &mut buffer,
+                        upload::MAX_UPLOAD_BYTES,
+                    ) {
                         Ok(len) => len,
+                        Err(ReceiveError::Storage(error))
+                            if error.kind() != io::ErrorKind::TimedOut =>
+                        {
+                            log::error!("UploadWindow: flash staging failed: {error}");
+                            if let Err(response_error) = response(
+                                &mut reader.get_mut().stream,
+                                "503 Service Unavailable",
+                                "text/plain",
+                                "Upload storage failed; saved frame unchanged. Further work is blocked; hotspot closing.",
+                            ) {
+                                log::warn!("UploadWindow: storage failure response failed: {response_error}");
+                            }
+                            FreeRtos::delay_ms(upload::RESULT_GRACE.as_millis() as u32);
+                            return Err(error.into());
+                        }
                         Err(error) => {
                             log::warn!("UploadWindow: receive failed: {error:?}");
                             reject(
@@ -305,7 +325,11 @@ pub fn run(
                             continue;
                         }
                     };
-                    if !upload::image_signature(&buffer.bytes_mut()[..len]) {
+                    let mut signature = [0; 8];
+                    buffer
+                        .reader(awake_deadline)
+                        .read_exact(&mut signature[..len.min(8)])?;
+                    if !upload::image_signature(&signature[..len.min(8)]) {
                         log::warn!("UploadWindow: PNG/JPEG signature missing");
                         reject(
                             &mut reader.get_mut().stream,

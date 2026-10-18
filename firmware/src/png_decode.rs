@@ -1,4 +1,4 @@
-use std::io::Cursor;
+use std::io::{BufRead, Cursor, Seek};
 
 use crate::{conversion, frame};
 
@@ -6,13 +6,29 @@ pub fn decode(
     encoded: &[u8],
     metadata: frame::Metadata,
     packed: &mut [u8],
+    checkpoint: impl FnMut() -> Result<(), &'static str>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    decode_reader(
+        Cursor::new(encoded),
+        encoded.len(),
+        metadata,
+        packed,
+        checkpoint,
+    )
+}
+
+pub fn decode_reader(
+    encoded: impl BufRead + Seek,
+    encoded_len: usize,
+    metadata: frame::Metadata,
+    packed: &mut [u8],
     mut checkpoint: impl FnMut() -> Result<(), &'static str>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    if encoded.len() > crate::upload::MAX_UPLOAD_BYTES || packed.len() != frame::FRAME_BYTES {
+    if encoded_len > crate::upload::MAX_UPLOAD_BYTES || packed.len() != frame::FRAME_BYTES {
         return Err("encoded image or packed buffer exceeds the image budget".into());
     }
     checkpoint()?;
-    let mut decoder = png::Decoder::new(Cursor::new(encoded));
+    let mut decoder = png::Decoder::new(encoded);
     decoder.set_limits(png::Limits { bytes: 128 * 1024 });
     decoder.set_ignore_text_chunk(true);
     decoder.set_ignore_iccp_chunk(true);
@@ -141,6 +157,58 @@ mod tests {
         let mut output = vec![0; frame::FRAME_BYTES];
         decode(&encoded, Default::default(), &mut output, || Ok(())).unwrap();
         assert!(frame::valid_pixels(&output));
+    }
+
+    #[test]
+    fn streams_exact_seven_mb_png_and_rejects_one_more_before_conversion() {
+        let mut pixels = vec![0; 1200 * 1600 * 3];
+        let mut random = 0x1234_5678_u32;
+        for byte in &mut pixels {
+            random ^= random << 13;
+            random ^= random >> 17;
+            random ^= random << 5;
+            *byte = random as u8;
+        }
+        let mut encoded = png(
+            1200,
+            1600,
+            png::ColorType::Rgb,
+            png::BitDepth::Eight,
+            &pixels,
+        );
+        assert!(encoded.len() > 4 * 1024 * 1024);
+        let end = encoded.split_off(encoded.len() - 12);
+        let padding = crate::upload::MAX_UPLOAD_BYTES - encoded.len() - end.len() - 12;
+        encoded.extend_from_slice(&(padding as u32).to_be_bytes());
+        let chunk_start = encoded.len();
+        encoded.extend_from_slice(b"tEXt");
+        encoded.extend_from_slice(b"padding\0");
+        encoded.resize(encoded.len() + padding - 8, b'x');
+        let crc = frame::crc32(&encoded[chunk_start..]);
+        encoded.extend_from_slice(&crc.to_be_bytes());
+        encoded.extend_from_slice(&end);
+        assert_eq!(encoded.len(), 7_000_000);
+        let mut output = vec![0; frame::FRAME_BYTES];
+        decode_reader(
+            std::io::BufReader::with_capacity(4096, Cursor::new(&encoded)),
+            encoded.len(),
+            Default::default(),
+            &mut output,
+            || Ok(()),
+        )
+        .unwrap();
+        assert!(frame::valid_pixels(&output));
+        encoded.push(0);
+        output.fill(0x11);
+        assert!(decode_reader(
+            std::io::BufReader::with_capacity(4096, Cursor::new(&encoded)),
+            encoded.len(),
+            Default::default(),
+            &mut output,
+            || panic!("oversize must fail before decoding"),
+        )
+        .is_err());
+        assert!(output.iter().all(|byte| *byte == 0x11));
     }
 
     #[test]

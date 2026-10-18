@@ -13,7 +13,8 @@ pub enum PipelineError {
 }
 
 pub fn save(
-    encoded: &[u8],
+    encoded: impl std::io::BufRead + std::io::Seek,
+    encoded_len: usize,
     metadata: frame::Metadata,
     deadline: Instant,
     safety: &mut firmware::safety::SafetyGuard<crate::safety_nvs::NvsSafetyStore>,
@@ -22,7 +23,7 @@ pub fn save(
         .map_err(|error| PipelineError::Fault(error.to_string()))?;
     log::info!(
         "Upload pipeline: decoding {} encoded bytes by rows; {metadata:?}; AP ON; panel OFF",
-        encoded.len()
+        encoded_len
     );
     let mut packed = PsramBuffer::new(frame::FRAME_BYTES)
         .map_err(|error| PipelineError::Fault(error.to_string()))?;
@@ -35,14 +36,24 @@ pub fn save(
         unsafe { esp_idf_svc::sys::heap_caps_get_free_size(external_caps) },
         unsafe { esp_idf_svc::sys::heap_caps_get_largest_free_block(external_caps) },
     );
-    png_decode::decode(encoded, metadata, packed.bytes_mut(), || {
+    png_decode::decode_reader(encoded, encoded_len, metadata, packed.bytes_mut(), || {
         if Instant::now() >= deadline {
             return Err("decode/conversion deadline exceeded");
         }
         FreeRtos::delay_ms(1);
         Ok(())
     })
-    .map_err(PipelineError::Rejected)?;
+    .map_err(|error| match error.downcast_ref::<png::DecodingError>() {
+        Some(png::DecodingError::IoError(io))
+            if !matches!(
+                io.kind(),
+                std::io::ErrorKind::UnexpectedEof | std::io::ErrorKind::TimedOut
+            ) =>
+        {
+            PipelineError::Fault(format!("upload flash read failed: {io}"))
+        }
+        _ => PipelineError::Rejected(error),
+    })?;
     if Instant::now() >= deadline {
         return Err(PipelineError::Rejected("commit deadline exceeded".into()));
     }

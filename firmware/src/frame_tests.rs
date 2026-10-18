@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn n16r8_partition_budget_preserves_four_mib_encoded_limit() {
+fn n16r8_partition_budget_supports_seven_mb_and_preserves_frames() {
     let mut previous_end = 0x9000;
     for line in include_str!("../partitions.csv").lines() {
         if line.starts_with('#') || line.is_empty() {
@@ -15,8 +15,14 @@ fn n16r8_partition_budget_preserves_four_mib_encoded_limit() {
         assert_eq!(size % 4096, 0);
         match fields[0] {
             "nvs" => assert_eq!(size, 24 * 1024),
-            "upload" => assert_eq!(size, 4_194_304),
-            "frames" => assert_eq!(size, STORAGE_BYTES),
+            "upload" => {
+                assert_eq!(size, 7 * 1024 * 1024);
+                assert!(size >= crate::upload::MAX_UPLOAD_BYTES);
+            }
+            "frames" => {
+                assert_eq!(offset, 0xe00000);
+                assert_eq!(size, STORAGE_BYTES);
+            }
             "factory" => assert!(size > 4 * 1024 * 1024),
             "phy_init" => assert_eq!(size, 4096),
             other => panic!("unexpected partition {other}"),

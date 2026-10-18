@@ -115,7 +115,7 @@ form.addEventListener('submit', async event => {
         ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
       }
       resized = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
-      if (!resized || resized.size > 4194304) throw new Error(resolveText(t('Nie udało się utworzyć pliku PNG w limicie 4 MiB. Spróbuj innego zdjęcia.')));
+      if (!resized || resized.size > 7000000) throw new Error(resolveText(t('Nie udało się utworzyć pliku PNG w limicie 7 MB. Spróbuj innego zdjęcia.')));
     } finally { image.close(); }
   } catch (error) {
     failProgress();

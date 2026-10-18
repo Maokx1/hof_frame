@@ -55,7 +55,8 @@ implemented behavior and build instructions.
   build-time credentials and no default. Browser Stretch/Fit normalizes
   PNG/JPEG to a display-sized PNG. Device PNG decoding is static/non-interlaced,
   row-based, bounded, alpha-over-white, with ordered six-color dithering.
-  Raw JPEG is not device-decoded. Input is capped at 4 MiB.
+  Raw JPEG is not device-decoded. Input is capped at 7 MB (7,000,000 bytes)
+  and staged in flash, not held in PSRAM. Decode uses a 4 KiB buffered reader.
 - Wi-Fi stays active during verified save and panel refresh. A chunked POST
   stream updates Send image / Process image / Update display / Complete.
   Initial HTTP 200 is not final success. Terminal success follows actual
@@ -231,7 +232,8 @@ after the latch is cleared shows it again.
   proportions) and **Fit** (preserve the whole image with white borders).
   Browser canvas resizing produces a display-sized PNG before transmission;
   original source files are limited to 7 MB (7,000,000 bytes) in the browser,
-  while the transmitted PNG remains limited to 4 MiB to preserve decoder memory.
+  and the transmitted PNG has the same 7,000,000-byte limit. Flash staging
+  preserves decoder memory; the updated partition table must be reflashed.
   Crop-to-fill is not implemented.
 
 ### State contracts
@@ -389,9 +391,14 @@ sequenceDiagram
   file), never committed to git, and printed on the frame. Serve the page at
   `http://192.168.4.1`. One client and one successful upload per wake, without an
   app-level login.
-- Allow PNG/JPEG only, with a maximum encoded body of **4 MiB (4,194,304 bytes)**.
-  Check declared size before allocation and cumulative size while streaming,
+- Allow PNG/JPEG only, with a maximum encoded body of **7 MB (7,000,000 bytes)**.
+  Check declared size before flash writes and cumulative size while streaming,
   including chunked or unknown-length bodies.
+  Stage through a 4 KiB buffer into the temporary 7 MiB upload partition,
+  erasing sectors on demand within the transfer deadline. Only a completely
+  received body is decoded. Staging never modifies the saved-frame slots.
+  Storage failures block work; malformed/interrupted requests permit bounded
+  retry. Upload bytes remain in flash until overwritten, not securely erased.
 - The initial idle window is five minutes from AP startup. Upload start replaces
   it with an inactivity timeout and an absolute transfer deadline, both
   **2 minutes** initially. Keep all timeouts as named constants in one place
@@ -513,7 +520,7 @@ separately.
 | 1 | Restore button/sleep integration; add wake-cause dispatch, SW7 gesture classification, and RTC timer. | Short press starts no work cycle; three-second hold dispatches upload once; triple press within the window dispatches refresh once; two presses or a slow third press sleep; held-button handling does not loop; timer wake keeps radio off. |
 | 2 | Confirm ADC wiring, calibrate measurement, implement persistent latch and work marker. | Low voltage blocks loads; brownout/unfinished cycle latches; timer cannot clear latch; only qualified acknowledgement above recovery clears it. |
 | 3 | Define frame orientation/format, partitions, atomic commit and validated loading. | Rotation/palette test image is correct; missing/corrupt frame shows the default frame with battery %; reset at each commit stage retains a valid committed frame. |
-| 4 | Implement AP/page and bounded receive path with all deadlines. | Idle timeout; disconnect; stalled and slow-drip uploads; exactly 4 MiB versus 4 MiB + 1; false declared sizes and unknown-length bodies. |
+| 4 | Implement AP/page and bounded receive path with all deadlines. | Idle timeout; disconnect; stalled and slow-drip uploads; exactly 7,000,000 versus 7,000,001 bytes; false declared sizes and unknown-length bodies; flash staging faults and maximum-size timing on hardware. |
 | 5 | Add bounded PNG/JPEG decode, stretch to chosen orientation, colour conversion and dithering. | Valid formats/orientations; malformed files; decoded-size bombs; unsupported decoder modes; peak memory within measured budget. |
 | 6 | Integrate commit, panel refresh, web result, cleanup and reset recovery. | AP stays active until final success, then closes after six seconds; recoverable failures allow bounded retry; fatal save/display/cleanup failures report then latch; no fallback refresh/error mark; BUSY timeout shuts panel down; interrupted refresh recovers after safe acknowledgement. |
 | 7 | Measure complete battery-powered operation. | Current at holder input for startup/AP/refresh/sleep; loaded thresholds; no converter cycling; 24-hour drift; full discharge runtime. |

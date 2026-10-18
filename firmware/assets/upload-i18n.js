@@ -56,7 +56,7 @@ const translations = {
   'Przygotowanie': 'Preparing',
   'Przygotowujemy zdjęcie w przeglądarce. Czas na rozpoczęcie wysyłania nadal biegnie.': 'Preparing your photo in the browser. The upload-window countdown is still running.',
   'Przeglądarka nie udostępnia narzędzia do obróbki obrazu.': 'Image processing is unavailable in this browser.',
-  'Nie udało się utworzyć pliku PNG w limicie 4 MiB. Spróbuj innego zdjęcia.': 'Could not create a PNG within the 4 MiB limit. Try another photo.',
+  'Nie udało się utworzyć pliku PNG w limicie 7 MB. Spróbuj innego zdjęcia.': 'Could not create a PNG within the 7 MB limit. Try another photo.',
   'Nie udało się przygotować zdjęcia. Wybierz inne i spróbuj ponownie.': 'Could not prepare this photo. Choose another and try again.',
   'Podczas przygotowywania zdjęcia upłynął czas hotspotu. Przytrzymaj SW7 przez 3 sekundy, aby otworzyć go ponownie.': 'The hotspot window expired while preparing your photo. Hold SW7 for 3 seconds to reopen it.',
   'Wysyłanie': 'Sending',

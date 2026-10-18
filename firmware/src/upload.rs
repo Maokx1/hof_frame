@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use crate::frame::{Corner, Metadata, Orientation};
 
-pub const MAX_UPLOAD_BYTES: usize = 4_194_304;
+pub const MAX_UPLOAD_BYTES: usize = 7_000_000;
 pub const IDLE_TIMEOUT: Duration = Duration::from_secs(300);
 pub const INACTIVITY_TIMEOUT: Duration = Duration::from_secs(120);
 pub const TRANSFER_TIMEOUT: Duration = Duration::from_secs(120);
@@ -98,6 +98,7 @@ pub fn receive_timed_out(
 #[derive(Debug)]
 pub enum ReceiveError {
     Io(io::Error),
+    Storage(io::Error),
     InvalidRequest,
     TooLarge,
     UnsupportedImage,
@@ -264,12 +265,23 @@ pub fn receive(
     destination: &mut [u8],
 ) -> Result<usize, ReceiveError> {
     let capacity = destination.len().min(MAX_UPLOAD_BYTES);
+    receive_to(reader, body, &mut io::Cursor::new(destination), capacity)
+}
+
+pub fn receive_to(
+    reader: &mut impl BufRead,
+    body: BodyLength,
+    destination: &mut impl Write,
+    capacity: usize,
+) -> Result<usize, ReceiveError> {
+    let capacity = capacity.min(MAX_UPLOAD_BYTES);
+    let mut buffer = vec![0; 4096];
     match body {
         BodyLength::Known(len) => {
             if len > capacity {
                 return Err(ReceiveError::TooLarge);
             }
-            reader.read_exact(&mut destination[..len])?;
+            copy_body(reader, destination, len, &mut buffer)?;
             Ok(len)
         }
         BodyLength::Chunked => {
@@ -294,7 +306,7 @@ pub fn receive(
                     .checked_add(size)
                     .filter(|end| *end <= capacity)
                     .ok_or(ReceiveError::TooLarge)?;
-                reader.read_exact(&mut destination[total..end])?;
+                copy_body(reader, destination, size, &mut buffer)?;
                 let mut crlf = [0; 2];
                 reader.read_exact(&mut crlf)?;
                 if crlf != *b"\r\n" {
@@ -304,6 +316,23 @@ pub fn receive(
             }
         }
     }
+}
+
+fn copy_body(
+    reader: &mut impl BufRead,
+    destination: &mut impl Write,
+    mut remaining: usize,
+    buffer: &mut [u8],
+) -> Result<(), ReceiveError> {
+    while remaining != 0 {
+        let count = remaining.min(buffer.len());
+        reader.read_exact(&mut buffer[..count])?;
+        destination
+            .write_all(&buffer[..count])
+            .map_err(ReceiveError::Storage)?;
+        remaining -= count;
+    }
+    Ok(())
 }
 
 pub fn image_signature(bytes: &[u8]) -> bool {
@@ -448,7 +477,8 @@ mod tests {
     }
 
     #[test]
-    fn exact_four_mib_is_accepted_but_one_more_is_rejected() {
+    fn exact_seven_mb_is_accepted_but_one_more_is_rejected() {
+        assert_eq!(MAX_UPLOAD_BYTES, 7_000_000);
         let bytes = vec![0x55; MAX_UPLOAD_BYTES];
         let mut output = vec![0; MAX_UPLOAD_BYTES];
         assert_eq!(
@@ -469,6 +499,93 @@ mod tests {
             ),
             Err(ReceiveError::TooLarge)
         ));
+    }
+
+    #[test]
+    fn streams_seven_mb_in_small_writes_and_reports_storage_failures() {
+        struct Sink {
+            written: usize,
+            fail: bool,
+        }
+        impl Write for Sink {
+            fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+                assert!(bytes.len() <= 4096);
+                if self.fail {
+                    return Err(io::Error::other("flash write failed"));
+                }
+                self.written += bytes.len();
+                Ok(bytes.len())
+            }
+            fn flush(&mut self) -> io::Result<()> {
+                Ok(())
+            }
+        }
+        let mut sink = Sink {
+            written: 0,
+            fail: false,
+        };
+        for body in [BodyLength::Known(MAX_UPLOAD_BYTES), BodyLength::Chunked] {
+            let bytes = vec![0x55; MAX_UPLOAD_BYTES];
+            let mut encoded = Vec::new();
+            if body == BodyLength::Chunked {
+                for chunk in bytes.chunks(3001) {
+                    write!(encoded, "{:x}\r\n", chunk.len()).unwrap();
+                    encoded.extend_from_slice(chunk);
+                    encoded.extend_from_slice(b"\r\n");
+                }
+                encoded.extend_from_slice(b"0\r\n\r\n");
+            } else {
+                encoded = bytes;
+            }
+            sink.written = 0;
+            assert_eq!(
+                receive_to(&mut Cursor::new(encoded), body, &mut sink, usize::MAX).unwrap(),
+                7_000_000
+            );
+            assert_eq!(sink.written, 7_000_000);
+        }
+        sink.fail = true;
+        assert!(matches!(
+            receive_to(
+                &mut Cursor::new(b"x"),
+                BodyLength::Known(1),
+                &mut sink,
+                MAX_UPLOAD_BYTES
+            ),
+            Err(ReceiveError::Storage(_))
+        ));
+        sink.fail = false;
+        sink.written = 0;
+        assert!(matches!(
+            receive_to(
+                &mut Cursor::new([]),
+                BodyLength::Known(7_000_001),
+                &mut sink,
+                usize::MAX
+            ),
+            Err(ReceiveError::TooLarge)
+        ));
+        assert_eq!(sink.written, 0);
+    }
+
+    #[test]
+    fn declared_seven_mb_is_accepted_and_one_more_is_rejected_before_writing() {
+        for (length, accepted) in [(7_000_000, true), (7_000_001, false)] {
+            let result = request(&mut Cursor::new(headers(&format!(
+                "Content-Length: {length}\r\n"
+            ))));
+            if accepted {
+                assert!(matches!(
+                    result,
+                    Ok(Request::Upload {
+                        body: BodyLength::Known(7_000_000),
+                        ..
+                    })
+                ));
+            } else {
+                assert!(matches!(result, Err(ReceiveError::TooLarge)));
+            }
+        }
     }
 
     #[test]
@@ -535,7 +652,7 @@ mod tests {
     #[test]
     fn rejects_oversize_duplicate_and_ambiguous_framing() {
         assert!(matches!(
-            request(&mut Cursor::new(headers("Content-Length: 4194305\r\n"))),
+            request(&mut Cursor::new(headers("Content-Length: 7000001\r\n"))),
             Err(ReceiveError::TooLarge)
         ));
         for extra in [

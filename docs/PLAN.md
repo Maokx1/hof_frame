@@ -272,8 +272,8 @@ Required behavior:
 - The browser normalizes PNG/JPEG to a display-sized PNG with Stretch/Fit;
   the device decodes, rotates, color-converts and dithers within bounded memory.
 - Accepted formats: PNG and JPEG.
-- Maximum size: 7 MB (7,000,000 bytes) for the original browser-selected photo;
-  4 MiB for the resized encoded upload sent to the device.
+- Maximum size: 7 MB (7,000,000 bytes) for both the original browser-selected
+  photo and the resized encoded upload sent to the device.
 - Reject unsupported types and a `Content-Length` over the limit before allocating storage. Enforce the limit on declared size and on cumulative received bytes while streaming, and reject chunked or unknown-length bodies that exceed it.
 - One client, one successful upload per wake; retry recoverable failures only
   within the original window. Access control is the WPA2 password plus the
@@ -290,9 +290,13 @@ Required behavior:
   smooth text, a white background and black border, and a 16-pixel margin
   from the selected corner. Allow room for the full battery icon and `100%`.
   Verify appearance on the panel before finalizing the font and layout.
-- Store only the current encoded upload in bounded temporary memory. Discard it after successful rendering, but retain the display-ready frame in non-volatile storage so the mandatory 24-hour refresh can reproduce it. Update that stored frame atomically only after complete image validation.
+- Stage the current encoded upload in a temporary flash partition through a
+  4 KiB buffer. Staging bytes remain until overwritten and are never loaded as
+  a saved frame. Retain the display-ready frame separately for the mandatory
+  24-hour refresh; update it atomically only after complete image validation.
 
-Rust side: `esp-idf-svc` provides the AP (`EspWifi` in AP mode) and `EspHttpServer`, with a GET handler for the page and a POST handler that streams the body into a PSRAM buffer.
+Rust side: `esp-idf-svc` provides the AP (`EspWifi` in AP mode). The bounded TCP
+HTTP receiver serves the page and streams POST bodies into flash staging.
 
 Known drawbacks: phones may warn that the network has no internet and some switch back to mobile data, so the user has to confirm staying connected. Wi-Fi draws more current than BLE while active (about 100–200 mA assumed, to be measured), but transfers should be much shorter.
 
@@ -302,7 +306,10 @@ The project owner still wants to move to Bluetooth eventually, so keep the desig
 
 ### Decoder memory budget
 
-Memory is the main firmware risk for on-device decoding. The 4 MiB encoded buffer and a full 1600×1200 RGB decode (5.76 MB) cannot both fit in 8 MB PSRAM, and phone photos are commonly 12 MP or more (about 36 MB as RGB). The decoder must therefore:
+Memory is the main firmware risk for on-device decoding. A 7 MB encoded buffer
+plus candidate and decoder workspace leaves insufficient PSRAM headroom.
+Encoded bytes are therefore staged in flash and read through a 4 KiB buffer.
+A full 1600 x 1200 RGB decode (5.76 MB) is also avoided. The decoder must therefore:
 
 - stream row-by-row or strip-by-strip, converting directly into the 4-bits-per-pixel display frame (1600×1200 × 4 bit = 960 KB) rather than holding a full-color image;
 - use JPEG DCT scaling (1/2, 1/4, 1/8) or equivalent downscaling during decode for large images;
@@ -323,7 +330,10 @@ An inactivity timeout alone does not stop a client that sends one chunk every fe
   checks the reset reason and work-in-progress marker before returning to
   safe sleep rather than repeating the failed work.
 
-Wi-Fi throughput through the ESP32-S3 access point is roughly 0.5–2 MB/s, so a 4 MiB upload should take seconds to tens of seconds. Choose the absolute deadline from measured transfers. For comparison, BLE would be roughly 10–80 kB/s (about a minute to several minutes).
+Wi-Fi throughput through the ESP32-S3 access point is roughly 0.5–2 MB/s;
+7 MB transfers now also pay flash erase/write costs. Qualify the 120-second
+absolute deadline with maximum-size transfers on the board. For comparison,
+BLE would be roughly 10–80 kB/s (about a minute to several minutes).
 
 Decided: SSID `HOF-Frame` with a build-time WPA2 password kept out of git; transfer-inactivity timeout and absolute transfer deadline both 2 minutes initially (easy-to-change constants); no upload checksum. If the battery reading fails, the battery box shows `?` and the frame carries on, relying on the converter's hardware cutoff.
 
@@ -334,7 +344,8 @@ Decided: SSID `HOF-Frame` with a build-time WPA2 password kept out of git; trans
 3. Bring up the display with a simple test pattern and validate the refresh sequence.
 4. Implement SW7/GPIO13 gesture classification (three-second hold for upload, triple press for manual refresh) and 24-hour RTC wake handling, including the low-battery behavior for scheduled and manual refreshes.
 5. Implement the Wi-Fi access point, HTTP server and upload page with the receive window; measure real transfer duration and shorten the five-minute timeout to limit awake time and exposure.
-6. Implement the streamed PNG/JPEG upload with the 4 MiB guardrail and the transfer deadlines.
+6. Implement the streamed PNG/JPEG upload with the 7,000,000-byte guardrail,
+   flash staging, and transfer deadlines.
 7. Decode, color-map, atomically persist, and render one validated image.
 8. Refresh the persisted frame after an RTC wake with Wi-Fi disabled.
 9. Implement the low-battery latch and verify, with real discharged cells, that the converter does not cycle.
@@ -350,7 +361,7 @@ Keep the README and supporting files aligned with the measured project:
 - Confirmed GPIO map and display interface.
 - Frame/CAD files and assembly notes.
 - Firmware state machine, upload page and HTTP interface (and the planned BLE move).
-- PNG/JPEG preparation and 4 MiB limit.
+- PNG/JPEG preparation and 7 MB (7,000,000-byte) limit.
 - Normal operation, interrupted-transfer recovery and low-battery latch behavior.
 - Whole-board sleep current and the corrected runtime budget.
 - Converter low-battery cutoff behavior and measured loaded-voltage threshold.
