@@ -10,7 +10,7 @@ Build a Hall of Fame frame around a 13.3-inch GDEP133C02 Spectra 6 color e-ink d
 - Controller: Good Display ESP32-133C02 with ESP32-S3-WROOM-1.
 - Memory: 16 MB flash and 8 MB octal PSRAM, corroborated by third-party research of Good Display's firmware (not yet measured on this board); confirm usable configuration during bring-up.
 - Wake button: the received board's user switches are **SW8 on GPIO12 and SW7 on GPIO13, both pull-up, active-low inputs** (released HIGH, pressed LOW). The firmware uses GPIO13/SW7 as the deep-sleep wake button; the current cycle test refreshes once per wake. The documented SW2/SW3/SW4 buttons are not fitted on this board.
-- Battery-sense ADC: **GPIO4 / ADC1_CH3 is the proposed pin in the wiring model, but is not yet confirmed to be broken out on the received board**. The board's documented pin table uses nearly every exposed GPIO (display, microSD, buttons, UART, USB), and GPIO4 is not in that table; verify it against the board schematic or headers before wiring the divider. If GPIO4 is inaccessible, identify another spare ADC1 pin. Sample the battery before starting Wi-Fi.
+- Battery-sense ADC: **GPIO14 / ADC2_CH3, ESP32-S3-WROOM-1 module pad 22**, selected after the user reported an accessible pad and no interfering board connection. Sample before starting Wi-Fi because this is ADC2. GPIO4 was not selected after the user found continuity to a microSD socket joint. Firmware and the executable wiring model still need updating; see [WIRING.md](WIRING.md) for measurement and power-sequencing notes.
 - Battery: four matched Green Cell AAA (R03) 950 mAh NiMH cells in a series holder. The series pack is 950 mAh at approximately 4.8 V nominal (4.56 Wh nominal).
 - Battery holder: [Allegro 4×AAA holder with integrated switch](https://allegro.pl/produkt/koszyk-na-4-baterie-aaa-4xaaa-z-wlacznikiem-czarny-4c5bce7c-e839-49d4-b6d2-8abc42cdc347?offerId=17382812988).
 - Reverse-polarity protection: none. The battery holder fixes the cell polarity, so a protector module was dropped to keep the first build simple and to save its quiescent current and voltage drop.
@@ -120,7 +120,7 @@ Define a conservative low-battery cutoff for the pack. Measure the minimum loade
 
 ### Battery-voltage measurement and cutoff circuit
 
-Measure the pack on the switched-holder side of the power path, before the converter. Use a high-impedance divider to the proposed GPIO4 / ADC1_CH3 input after confirming that it is accessible on the board:
+Measure the pack on the switched-holder side of the power path, before the converter. Use a high-impedance divider to the selected GPIO14 / ADC2_CH3 input (module pad 22), sampling before Wi-Fi starts:
 
 ```text
 Battery+ after holder switch ── 100 kΩ ──┬── ADC input
@@ -339,7 +339,7 @@ Decided: SSID `HOF-Frame` with a build-time WPA2 password kept out of git; trans
 
 ## Firmware milestones
 
-1. Confirm the ESP32-S3-WROOM-1 configuration, board GPIO map (including whether proposed battery-sense pin GPIO4 / ADC1_CH3 is broken out, or identify an alternative ADC input), display bus, SW7/GPIO13 (active-low, pull-up) wake behavior, PSRAM, flash layout, and Wi-Fi AP support.
+1. Confirm the ESP32-S3-WROOM-1 configuration, board GPIO map (including electrical qualification of the selected GPIO14 / ADC2_CH3 battery-sense connection), display bus, SW7/GPIO13 (active-low, pull-up) wake behavior, PSRAM, flash layout, and Wi-Fi AP support.
 2. Create a minimal ESP-IDF-backed Rust project that builds, can be flashed during development, logs the wake cause, enters deep sleep, and redraws after SW7/GPIO13 wakes it. Measure the whole board's deep-sleep current at its 5 V input as early as possible, since it dominates the battery budget.
 3. Bring up the display with a simple test pattern and validate the refresh sequence.
 4. Implement SW7/GPIO13 gesture classification (three-second hold for upload, triple press for manual refresh) and 24-hour RTC wake handling, including the low-battery behavior for scheduled and manual refreshes.

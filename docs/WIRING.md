@@ -19,14 +19,45 @@ KICAD_SYMBOL_DIR=.kicad/symbols uv run wiring --kicad
 
 For the proof of concept, use an off-the-shelf passive DC voltage-sensor
 module, commonly sold as a `0–25 V` or `0–25 V 5:1 voltage divider` module.
-[This 25 V voltage-sensor module](https://phippselectronics.com/product/25v-voltage-sensor-module/)
-is a representative example:
+[Purchased Botland 5V/25V voltage-divider module](https://botland.com.pl/czujniki-pradu/8231-dzielnik-napiecia-5v25v-dla-arduino-5904422311285.html):
 
 ```text
 BAT+ after holder switch ── module VIN / +
 BAT− / system GND ───────── module GND / −
-module VOUT / S ──────────── GPIO4 / ADC1_CH3 (proposed; verify it is broken out)
+module VOUT / S ──────────── GPIO14 / ADC2_CH3 (ESP32-S3-WROOM-1 module pad 22)
+module header − ──────────── controller GND
+module header + ──────────── leave disconnected (not connected internally)
 ```
+
+GPIO14 was selected after the user reported an accessible pad and no
+interfering board connection. GPIO4 was not selected: the user found
+continuity to a microSD socket joint. Battery sensing is not yet implemented;
+sample ADC2 before starting Wi-Fi. The executable wiring model and generated
+schematic still show the earlier GPIO4 proposal and have not yet been updated.
+Do not power the divider signal into an unpowered controller; for bench tests,
+power the controller before enabling the divider and disable the divider
+before removing controller power. Permanent power sequencing remains unresolved.
+
+### U22 unpopulated footprint: user-reported pad mapping
+
+On the received board, viewed from the component side with the **USB-C port
+pointing down**, the user identified these connections on the five-pad row
+at the unpopulated U22 footprint, ordered **top to bottom**:
+
+| Position in the row | Connection | ESP32-S3-WROOM-1 module pad |
+| --- | --- | --- |
+| Top | GPIO43 / TXD0 | 37 |
+| Second | GPIO44 / RXD0 | 36 |
+| Third | GND | — |
+| Fourth | 3V3 | 2 |
+| Bottom | GPIO14 / ADC2_CH3 | 22 |
+
+These are physical positions in the identified row, not U22 package pin
+numbers or a complete U22 footprint pinout. This mapping is user-reported
+from the received board, not verified against a controller schematic.
+The bottom pad provides the selected battery-sense solder point for divider
+`S`; the third pad provides GND for divider header `−`. Leave divider header
+`+` disconnected; do not connect it to U22's 3V3 pad.
 
 These modules are normally only resistor dividers; they need no supply
 connection. A typical 5:1 module produces 0.96 V from a 4.8 V pack and 1.2 V
@@ -34,6 +65,21 @@ from a 6.0 V pack, which is suitable for the ESP32-S3 ADC input. Confirm the
 actual divider ratio and that its maximum output is within the confirmed ADC
 input range before connecting it. Keep its output wire away from the
 S9V11MACMA switching node.
+
+### Recorded divider measurement
+
+Measured with the battery pack connected to the divider and the controller
+disconnected:
+
+| Item | Measured / calculated value |
+| --- | --- |
+| Input voltage (screw-terminal positive to negative) | 5.104 V |
+| Output voltage (header S to header −) | 1.0155 V |
+| Estimated input/output ratio (5.104 / 1.0155) | ≈ 5.026:1 |
+
+The output is approximately 0.52% below the nominal 5:1 divider's expected
+1.0208 V. This is a single measurement point, not a full divider or ADC
+calibration; the estimated ratio includes multimeter uncertainty.
 
 Typical 0–25 V modules use a 30 kΩ and 7.5 kΩ divider, drawing approximately
 128 µA from a 4.8 V pack. This is acceptable for the PoC but is a permanent
@@ -102,7 +148,7 @@ next refresh restores the picture.
 | S9V11MACMA GND | ESP32-133C02 GND | Common return | Required |
 | Holder BAT+ after switch | Voltage-sensor module VIN/+ | Battery measurement source | Battery side, before the converter |
 | Holder BAT− | Voltage-sensor module GND/− | Measurement return | Common system ground |
-| Voltage-sensor module VOUT/S | GPIO4 / ADC1_CH3 | Pack-voltage sense | Proposed in [`wiring_model`](wiring_model), not confirmed broken out; check the board schematic or headers, plus the module output range and ratio, before wiring |
+| Voltage-sensor module VOUT/S | GPIO14 / ADC2_CH3, module pad 22 | Pack-voltage sense | Selected accessible connection; measure before Wi-Fi. Firmware and [`wiring_model`](wiring_model) update pending |
 | SW7 | GPIO13 | **Pull-up, active-low**, RTC-capable | Fitted switch; firmware wakes from deep sleep and redraws the display |
 | SW8 | GPIO12 | **Pull-up, active-low**, RTC-capable | Fitted switch; same polarity confirmed by the user, currently unused |
 | ESP32-133C02 display connector | GDEP133C02 | Supplied display cable | Do not substitute a cable or assume pin order |
@@ -117,6 +163,24 @@ forward drop and reverse leakage also count against the supply voltage and
 the sleep-current budget.
 
 ## Bring-up and cutoff procedure
+
+### Next session: first task (planned for 2026-10-20)
+
+First solder the divider signal wire to the bottom GPIO14 pad of the
+identified U22 row and its ground wire to the third (GND) pad, using the
+orientation documented above. Disconnect USB and batteries before soldering.
+Inspect for bridges and check continuity before applying power. For the
+initial USB-powered test, keep the converter output disconnected from the
+controller, power the controller before enabling the divider, and disable the
+divider before removing controller power. ADC firmware work comes later.
+
+Battery powering is a separate follow-up: qualify the converter/diode output
+and a confirmed controller 5 V/VBUS input, or use a correctly wired USB-C
+power-input adapter. Do not connect the pack to U22's 3V3 pad or the onboard
+Li-ion battery connector. Permanent divider power sequencing still needs
+resolution before unattended battery use.
+
+### Power-path qualification
 
 1. Install matched, removable AAA NiMH cells only after all continuity checks.
 2. With the controller disconnected, verify holder polarity, switch operation,
@@ -209,7 +273,7 @@ is required.
 | 2 | 1 | 4× AAA battery holder with integrated switch (Allegro listing) | Retain cell-removal access; confirm the listing has a switch and takes AAA cells |
 | 3 | 1 | [Pololu S9V11MACMA #2868](https://www.pololu.com/product/2868) step-up/step-down converter with adjustable low-voltage cutoff | Set output to 5.0 V and cutoff (start ~4.4 V) before connection; not latching. Ships without terminals or headers |
 | 4 | 1 | 1N5822 Schottky diode (3 A, 40 V, DO-201AD through-hole) | Series diode between converter output and controller 5 V input; band toward the controller |
-| 5 | 1 | [Passive 0–25 V, 5:1 DC voltage-sensor module](https://phippselectronics.com/product/25v-voltage-sensor-module/) | PoC battery-voltage measurement; verify its actual resistor values and ratio |
+| 5 | 1 | [Passive 0–25 V, 5:1 DC voltage-sensor module](https://botland.com.pl/czujniki-pradu/8231-dzielnik-napiecia-5v25v-dla-arduino-5904422311285.html) | PoC battery-voltage measurement; verify its actual resistor values and ratio |
 
 ### Already owned (do not order)
 
