@@ -422,6 +422,9 @@ fn main() {
         firmware::gesture::FaultSwitch::new(Instant::now(), fault_button.is_low());
     let mut simulated_fault = false;
     log::warn!("USB session reset reason: {:?}; development reboot resets USB runtime guard, not production recovery", ResetReason::get());
+    if let Err(error) = safety_nvs::log_production_diagnostics() {
+        log::error!("could not read production safety NVS snapshot: {error:?}");
+    }
     let mut safety = match safety_nvs::open_usb_session(ResetReason::get() == ResetReason::Brownout)
     {
         Ok(safety) => safety,

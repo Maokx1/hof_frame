@@ -90,6 +90,21 @@ pub fn open_usb_session(
     open_store("hof_usb", brownout, true)
 }
 
+#[cfg(feature = "usb")]
+pub fn log_production_diagnostics() -> Result<(), EspError> {
+    let partition = EspDefaultNvsPartition::take_with(false)?;
+    let nvs = EspDefaultNvs::new(partition, "hof_safety", false)?;
+    let state = nvs.get_u8("state_v1")?;
+    let diagnostic = nvs.get_u32("diag_v1")?;
+    let last_fault = nvs.get_u32("last_fault_v1")?;
+    log::info!(
+        "production safety NVS snapshot (read-only): state={state:?}, diag_v1 raw={diagnostic:?} decoded={:?}, last_fault_v1 raw={last_fault:?} decoded={:?}",
+        diagnostic.and_then(Diagnostic::from_record),
+        last_fault.and_then(Diagnostic::from_record)
+    );
+    Ok(())
+}
+
 fn open_store(
     namespace: &str,
     brownout: bool,
