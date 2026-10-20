@@ -17,6 +17,27 @@ schematic, follow the setup instructions in the repository
 KICAD_SYMBOL_DIR=.kicad/symbols uv run wiring --kicad
 ```
 
+### As-built power-path deviation (2026-10-20)
+
+The user reports that the 1N5822 Schottky diode was omitted. The S9V11MACMA's
+5 V output is connected to the controller through its USB-C input using the
+same USB-C port otherwise used for computer power. Do not connect a computer,
+charger, or other USB power source while the battery converter is connected.
+This is the current bench arrangement, not a verified isolation design; the
+executable wiring model and generated schematic still show the planned diode.
+
+With computer USB power, display refresh works. With battery-converter power,
+refresh starts but fails partway through. The cause has not yet been
+established. During refresh, the user measured about 5.0005 V at the board
+input before refresh and about 4.995 V as it started, a change of roughly
+5.5 mV. This meter reading does not show a substantial sustained voltage
+drop, but it does not rule out brief transients or a non-power-related fault.
+The firmware's production safety state and last committed work phase are
+stored in NVS. After the failure, power off the converter, connect USB, and
+run the USB development build to print a read-only snapshot of production
+NVS; do not erase NVS or perform a full-chip erase first. See the procedure
+in [`firmware/README.md`](../firmware/README.md).
+
 For the proof of concept, use an off-the-shelf passive DC voltage-sensor
 module, commonly sold as a `0–25 V` or `0–25 V 5:1 voltage divider` module.
 [Purchased Botland 5V/25V voltage-divider module](https://botland.com.pl/czujniki-pradu/8231-dzielnik-napiecia-5v25v-dla-arduino-5904422311285.html):
@@ -120,7 +141,6 @@ The preliminary input-side budget for one 14-day photo interval is:
 | **Subtotal of known terms** | | **~145–154 mAh** |
 | ESP32-133C02 board sleep current | Whole board on its 5 V input (regulators, USB-UART, level shifters, SD slot), not just the ESP32-S3 | **Unmeasured**; each 0.1 mA adds ~34 mAh |
 | NiMH self-discharge | Depends on cell type | **Unmeasured** |
-| Schottky diode reverse leakage | | **Unmeasured**, expected small |
 
 The unmeasured board sleep current can dominate everything else; measure it
 first. The six-week planning figure leaves about 100 mAh per 14 days (about
@@ -143,8 +163,7 @@ next refresh restores the picture.
 | --- | --- | --- | --- |
 | Holder BAT+ after switch | S9V11MACMA VIN+ | Switched battery positive | Required |
 | Holder BAT− | S9V11MACMA VIN−/GND and system GND | Battery return | Required |
-| S9V11MACMA VOUT+ | 1N5822 Schottky diode anode | Regulated 5 V | Diode is 3 A, 40 V; band (cathode) toward the controller |
-| 1N5822 cathode | ESP32-133C02 5 V/VBUS input | Regulated 5 V (minus about 0.4–0.5 V diode drop) | Verify board label and polarity; confirm the controller runs reliably with the drop, else raise the converter output slightly |
+| S9V11MACMA VOUT+ | ESP32-133C02 USB-C 5 V input, through the user's cable | Regulated 5 V; no series diode in the as-built setup | Confirm cable polarity and voltage at the board under load; do not connect another USB power source simultaneously |
 | S9V11MACMA GND | ESP32-133C02 GND | Common return | Required |
 | Holder BAT+ after switch | Voltage-sensor module VIN/+ | Battery measurement source | Battery side, before the converter |
 | Holder BAT− | Voltage-sensor module GND/− | Measurement return | Common system ground |
@@ -153,32 +172,109 @@ next refresh restores the picture.
 | SW8 | GPIO12 | **Pull-up, active-low**, RTC-capable | Fitted switch; same polarity confirmed by the user, currently unused |
 | ESP32-133C02 display connector | GDEP133C02 | Supplied display cable | Do not substitute a cable or assume pin order |
 
-The USB-C input on the controller must not be used in a way that back-feeds
-the battery-powered 5 V rail into a computer or charger. The series Schottky
-diode on the converter output stops USB power from driving the converter
-output. It does not by itself stop the battery rail from energizing the USB
-connector's VBUS if the board ties VBUS to its 5 V input; confirm this on the
-schematic, or switch the holder off while USB is connected. The diode's
-forward drop and reverse leakage also count against the supply voltage and
-the sleep-current budget.
+There is no series diode in the as-built power path. The user avoids
+simultaneous sources by using the controller's single USB-C port for either
+the converter cable or computer USB, never both. Do not connect another USB
+source while the converter is on; the board's exact USB/VBUS isolation
+behavior has not been verified. The planned schematic still includes the
+1N5822 and should not be treated as an as-built record.
+
+### Battery-powered refresh failure
+
+The user reports that a refresh begins but stops partway through on the
+battery converter, while computer USB power refreshes normally. The board
+input was measured at about 5.0005 V before refresh and about 4.995 V when
+refresh started. This small observed change makes a sustained input-voltage
+drop less likely, but a handheld meter may miss short dips and cannot establish
+whether the converter or board is experiencing current limiting. A power
+problem remains possible, but is not confirmed. Continue diagnosis:
+
+1. Confirm where the voltage was measured and whether the reading was taken
+   at the controller's 5 V/VBUS input during the actual failure. Repeat at the
+   converter output and battery input; use min/max capture if available.
+   A scope is more useful for brief transients than a handheld meter.
+2. Capture serial logs or reset-reason output for the failed run, and compare
+   it with a successful USB-powered refresh. If the board has already been
+   power-cycled, use USB development mode to read the production NVS snapshot;
+   it preserves the `hof_safety` namespace. Check for brownout/reset messages
+   or a firmware error/timeout while waiting for the panel BUSY signal.
+3. If power measurements remain stable and logs show no reset, investigate
+   whether the refresh stops at the same stage each time. That points toward
+   panel-control, BUSY handling, or firmware state rather than assuming the
+   battery pack cannot supply enough current.
+4. If voltage dips are found, inspect the holder switch and battery contacts,
+   solder joints, cable and connectors; retest with a freshly charged, matched
+   cell set. Do not raise the converter output above the controller's
+   specified USB input voltage to mask a sag.
+
+Avoid probing adjacent USB-C contacts or exposed pads with a meter probe in a
+way that could short them. Disconnect power before reworking wiring.
 
 ## Bring-up and cutoff procedure
 
-### Next session: first task (planned for 2026-10-20)
+### Current bring-up status (2026-10-20)
 
-First solder the divider signal wire to the bottom GPIO14 pad of the
-identified U22 row and its ground wire to the third (GND) pad, using the
-orientation documented above. Disconnect USB and batteries before soldering.
-Inspect for bridges and check continuity before applying power. For the
-initial USB-powered test, keep the converter output disconnected from the
-controller, power the controller before enabling the divider, and disable the
-divider before removing controller power. ADC firmware work comes later.
+Accomplished today:
 
-Battery powering is a separate follow-up: qualify the converter/diode output
-and a confirmed controller 5 V/VBUS input, or use a correctly wired USB-C
-power-input adapter. Do not connect the pack to U22's 3V3 pad or the onboard
-Li-ion battery connector. Permanent divider power sequencing still needs
-resolution before unattended battery use.
+- Soldered the divider and battery-converter wiring. The converter powers the
+  controller through its USB-C input; the planned Schottky diode was
+  intentionally omitted. Use only one USB-C power source at a time.
+- Confirmed that refresh works on computer USB but starts and then fails
+  partway through on converter power.
+- Measured about 5.0005 V at the board input before refresh and about 4.995 V
+  as it started (roughly a 5.5 mV change). This does not show a substantial
+  sustained drop, but a multimeter may miss brief transients.
+- Added a USB-mode, read-only snapshot of the production safety NVS records,
+  and documented how to inspect them after a failed run.
+- Validated production and USB firmware builds, formatting, and all 101 host
+  tests. The NVS snapshot has not yet been confirmed on the physical board.
+
+### Next bench session checklist
+
+Follow these steps in order. Do not connect computer USB while the battery
+converter is on.
+
+1. **Reproduce the failure with the same firmware mode/build that previously
+   failed.** Do not change firmware mode before reproducing it. Check that the
+   converter and cells are connected as usual, and note the displayed stage
+   or behavior when refresh stops. If convenient, note the board-input
+   voltage/minimum captured during the attempt.
+2. **Stop battery power safely.** Switch off the holder/converter and
+   disconnect the battery-powered USB-C cable. Do not attach computer USB
+   until the converter is off.
+3. **Read the persistent diagnostics.** Connect the board to the computer and
+   from the repository root run:
+
+   ```sh
+   cd firmware
+   cargo run --release --features usb
+   ```
+
+   Enter the hotspot password only at the hidden prompt if requested. This
+   flashes/runs the USB diagnostic build. Normal application flashing
+   preserves NVS; do not erase NVS or use a full-chip erase.
+4. **Capture the boot output promptly.** Save the line beginning
+   `production safety NVS snapshot (read-only)` and the nearby lines for
+   `USB session reset reason`, `safety diagnostics: previous state`, and
+   `last recorded fault`. USB mode resets only its own `hof_usb` runtime
+   guard after logging it; the production `hof_safety` snapshot is read-only.
+5. **Interpret, don't overdiagnose.** `state=Some(161)` (`0xA1`, Working)
+   with phase `Display` means execution or power stopped during display work.
+   A `Brownout` reason means firmware rebooted and recorded that reset cause.
+   Neither result by itself proves the root cause. A clean state or missing
+   marker may mean this firmware did not persist the attempted work, or that
+   the failure happened outside the marked interval.
+6. **Share the evidence before changing wiring.** Copy the captured NVS lines,
+   note whether refresh stopped at the same point as before, and include any
+   minimum-voltage reading. Use that to decide whether the next step is
+   firmware/panel investigation or better transient/current measurements.
+
+The USB development build performs real panel refreshes on its accelerated
+schedule; do not leave it running unattended. Disconnect power when finished.
+
+Do not connect the pack to U22's 3V3 pad or the onboard Li-ion battery
+connector. Permanent divider power sequencing still needs resolution before
+unattended battery use.
 
 ### Power-path qualification
 
@@ -272,7 +368,7 @@ is required.
 | 1 | 1 | Good Display GDEP133C02 panel with ESP32-133C02 controller (ESP32-S3-WROOM-1), as the paired development kit | Panel and board come together; confirm the 5 V/VBUS input during bring-up |
 | 2 | 1 | 4× AAA battery holder with integrated switch (Allegro listing) | Retain cell-removal access; confirm the listing has a switch and takes AAA cells |
 | 3 | 1 | [Pololu S9V11MACMA #2868](https://www.pololu.com/product/2868) step-up/step-down converter with adjustable low-voltage cutoff | Set output to 5.0 V and cutoff (start ~4.4 V) before connection; not latching. Ships without terminals or headers |
-| 4 | 1 | 1N5822 Schottky diode (3 A, 40 V, DO-201AD through-hole) | Series diode between converter output and controller 5 V input; band toward the controller |
+| 4 | 1 | 1N5822 Schottky diode (3 A, 40 V, DO-201AD through-hole) | Planned isolation component; intentionally omitted from the as-built setup |
 | 5 | 1 | [Passive 0–25 V, 5:1 DC voltage-sensor module](https://botland.com.pl/czujniki-pradu/8231-dzielnik-napiecia-5v25v-dla-arduino-5904422311285.html) | PoC battery-voltage measurement; verify its actual resistor values and ratio |
 
 ### Already owned (do not order)

@@ -23,13 +23,20 @@ Build a Hall of Fame frame around a 13.3-inch GDEP133C02 Spectra 6 color e-ink d
 flowchart TD
     A["4× AAA NiMH switched holder"]
     C["Pololu S9V11MACMA<br/>5 V converter with<br/>adjustable low-voltage cutoff"]
-    S["Schottky diode<br/>1N5822"]
     D["ESP32-133C02<br/>5 V / VBUS input"]
 
-    A --> C --> S --> D
+    A --> C --> D
 ```
 
-The four-cell pack is approximately 4.8 V nominal and may be close to 6 V immediately after charging. The S9V11MACMA accepts the pack's voltage range and regulates the controller supply. A fuse or resettable PTC is optional overcurrent protection, not a voltage-compatibility requirement. The USB-C input must not be back-fed into a computer or charger. A 1N5822 Schottky diode (3 A, 40 V, through-hole) in series with the converter output (converter VOUT+ to the controller's 5 V input) isolates the converter from USB power. During development the board is powered over USB-C with the display attached; the battery path is wired up later. It does not by itself stop the battery rail from energizing the USB connector's VBUS if the board ties VBUS to its 5 V input; check the schematic, or keep the holder switch off while USB is connected. The 1N5822 drops roughly 0.4–0.5 V at an amp or so, so the board sees about 4.5–4.6 V. Verify during bring-up that the controller and panel run reliably with that drop; if not, raise the converter output slightly.
+The four-cell pack is approximately 4.8 V nominal and may be close to 6 V immediately after charging. The S9V11MACMA accepts the pack's voltage range and regulates the controller supply. A fuse or resettable PTC is optional overcurrent protection, not a voltage-compatibility requirement. The converter powers the controller through its USB-C input. The as-built setup omits the planned series Schottky diode, so never connect computer or charger USB at the same time; see the bring-up notes in [WIRING.md](WIRING.md).
+
+**As built (2026-10-20):** the user intentionally omitted the 1N5822 and
+connects the converter's 5 V output to the controller through its USB-C input.
+The same USB-C port is used for computer power, so the user will not connect
+computer/charger USB while the converter is connected. The board's USB/VBUS
+isolation behavior is not verified; do not connect another USB power source
+while the converter is on. This differs from the original executable wiring
+model, which still includes the diode.
 
 The S9V11MACMA provides the hardware low-battery cutoff: its input voltage
 feeds the EN pin through an 11-turn cutoff potentiometer, and the converter
@@ -59,12 +66,13 @@ The holder listing and board specifications must be checked against the physical
 Checked against photos of the received board and Good Display's ESP32-133C02-IL specification and panel schematic (the panel schematic does not cover the driver board).
 
 - **Onboard Li-ion charger.** An IP5306 power-bank IC (U14) and a battery connector are fitted. The board is designed for one Li-ion cell. **Never connect the NiMH pack to the board's battery connector**; the IP5306 would try to charge it as a 4.2 V cell.
-- **NiMH path is questionable.** The planned converter, diode, then board 5 V input feeds the IP5306's USB-side input. Before committing to it:
+- **NiMH path is questionable.** The converter feeds the IP5306's USB-side input through the board's USB-C connector. The user has omitted the planned diode. Do not connect another USB source simultaneously. Before relying on battery power:
   - Confirm the pad used is VBUS (the IP5306 input), not its 5 V output.
-  - The IP5306 typically needs about 4.5 V or more on its input, and the 1N5822 drops 0.4–0.5 V, so set the converter to about 5.1–5.2 V and measure VBUS under load, especially during a refresh.
+  - The IP5306 typically needs about 4.5 V or more on its input; measure voltage at the board under load, especially during a refresh. Do not raise the converter output above the controller's specified USB input voltage to compensate for a drop.
   - Power-bank ICs usually switch their output off after about 30 s of light load; confirm the board survives a minute of deep sleep.
   - The IP5306 and charge path add to the board sleep current, which is still unmeasured. Measure it before trusting the runtime estimate.
   - If sleep current or output shut-off is a problem, the fallback is to remove or bypass the IP5306 and power the 5 V rail directly (invasive).
+- **Battery-powered refresh currently fails partway through.** Computer USB power refreshes normally; battery-converter power starts the refresh but stops mid-cycle. The user measured about 5.0005 V at the board input before refresh and about 4.995 V as it started. This small observed change makes a sustained input-voltage drop less likely, but a handheld meter may miss brief transients. A read-only production NVS snapshot is now logged by the USB development build. The next bench session is to reproduce the failure on the same firmware mode, power down the converter, then run the USB build and capture the NVS diagnostics; follow the checklist in [WIRING.md](WIRING.md#next-bench-session-checklist). Firmware changes passed production/USB builds, formatting, and 101 host tests; board confirmation remains outstanding.
 - **Buttons.** SW2/SW3/SW4 are not fitted. The fitted **SW8/GPIO12 and SW7/GPIO13 are pull-up, active-low**. SW7 is the RTC wake/gesture input. SW8 toggles an idle-only simulated fault in USB mode and is unused in production. The previous assumption that these switches only drove the IP5306 was incorrect.
 - **Panel pins** (from the specification and the vendor example): SPI SCK GPIO9, MOSI GPIO41, MISO GPIO40, CS_M GPIO18, CS_S GPIO17, RST GPIO6, BUSY GPIO7 (low while busy), and a panel power **load switch on GPIO45** (high = on). `firmware/src/epd.rs` ports the vendor init sequence.
 - **Debug port.** The native USB-Serial/JTAG enumerates as `303a:1001`, `/dev/ttyACM0`. In deep sleep the port disappears, and with no wake input the board must be unplugged and re-plugged (or reset) to flash again.
@@ -106,7 +114,6 @@ The preliminary input-side budget for one 14-day interval is:
 | **Subtotal of known terms** | | **~145–154 mAh** |
 | ESP32-133C02 board sleep current | Whole board on its 5 V input (regulators, USB-UART, level shifters, SD slot), not just the ESP32-S3 | **Unmeasured**; each 0.1 mA adds ~34 mAh |
 | NiMH self-discharge | Depends on cell type | **Unmeasured** |
-| Schottky diode reverse leakage | | **Unmeasured**, expected small |
 
 At ~750 mAh usable, the known terms alone give about 5.2 intervals (about 10
 weeks). The unmeasured board sleep current can dominate everything else, so
@@ -184,7 +191,7 @@ The physical design and fit-check prototype are considered complete for planning
 - Display panel and front bezel.
 - ESP32-133C02 board and display cable.
 - Battery holder with cell-removal access and switch access.
-- S9V11MACMA converter, Schottky diode, wiring, and cable bend radius.
+- S9V11MACMA converter, wiring, and cable bend radius.
 - Rear cover, service access, and wall/stand mounting.
 
 ## Firmware behavior

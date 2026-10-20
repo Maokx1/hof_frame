@@ -85,13 +85,15 @@ records are erased or acknowledged by this migration. At each USB boot, the
 previous `hof_usb` state is logged and explicitly reset to Clean. This includes
 boots after interrupted work or brownout and is a development-only policy,
 not battery-qualified recovery; USB must not be used for battery operation.
-The current reset reason is logged separately. The simulated fault is
-separate from this real runtime guard: **SW8 cannot clear actual storage,
-panel, radio, or cleanup faults**. Runtime failures stop without automatic
-retry for the rest of that USB session; reboot starts a new USB session.
-SW8 cannot perform that runtime recovery. Production faults remain blocked
-across reboot. NVS read/write failures still block boot and never
-trigger automatic partition erasure.
+Before that reset, USB mode also prints a **read-only snapshot** of the
+production `hof_safety` NVS state and diagnostic records. It does not change
+the production namespace. The current reset reason is logged separately. The
+simulated fault is separate from this real runtime guard: **SW8 cannot clear
+actual storage, panel, radio, or cleanup faults**. Runtime failures stop
+without automatic retry for the rest of that USB session; reboot starts a new
+USB session. SW8 cannot perform that runtime recovery. Production faults
+remain blocked across reboot. NVS read/write failures still block boot and
+never trigger automatic partition erasure.
 
 There is no production latch acknowledgement until qualified battery recovery
 checks exist. Raw state and transitions are logged. A missing record initializes
@@ -122,12 +124,24 @@ unknown safety-state bytes become InvalidState; explicit latches record
 RuntimeFailure with the active phase. A current ordinary USB/programmer reset
 does not imply that the historical fault was a brownout.
 
+To inspect a failed battery-powered run, switch off/disconnect the battery
+converter, connect the board to the computer, then flash and run the USB
+development build. Read the `production safety NVS snapshot (read-only)` line
+in the serial monitor. Normal application flashing preserves NVS; do not erase
+the NVS partition or perform a full-chip erase before collecting the snapshot.
+The stored phase and reason are useful evidence, not a full serial log: there
+is no timestamp or saved driver error. A `Working` state with phase `Display`
+means power was lost or execution stopped during display work; a recorded
+`Brownout` means the production firmware restarted and observed a brownout
+reset. If power disappears before firmware can reboot, the NVS marker can
+identify interrupted display work but cannot prove the electrical cause.
+For the full reproduce → power down → read diagnostics sequence, see the
+[next bench session checklist](../docs/WIRING.md#next-bench-session-checklist).
+
 Example information (not a result from your board):
 
 ```text
-safety diagnostics: previous state=Some(161), work=Some(Diagnostic { phase: Save, reason: None })
-safety diagnostics: fault=Interrupted, phase=Save
-USB development recovery: starting new session ...
+production safety NVS snapshot (read-only): state=Some(161), diag_v1 raw=Some(3506439424) decoded=Some(Diagnostic { phase: Display, reason: None }), last_fault_v1 raw=None decoded=None
 ```
 
 USB archives an inferred interruption before clearing its runtime guard; the
