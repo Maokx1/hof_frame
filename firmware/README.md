@@ -351,9 +351,20 @@ accordingly; success starts the six-second shutdown countdown, and retry uses
 the remaining time reported by the board. Screen readers receive time warnings
 at 60, 30, and 10 seconds rather than announcements on every timer tick.
 
+Before embedded builds, leave any active Python virtual environment (for
+example, run `deactivate` in the terminal that activated the wiring project's
+`.venv`) or use a terminal without Python environment auto-activation.
+ESP-IDF creates its own Python environment during SDK setup. Using a virtual
+environment's interpreter can fail with
+`This script was called from a virtual environment, can not create a virtual environment again`.
+Simply unsetting `VIRTUAL_ENV` is insufficient: `python3` must resolve to a base
+interpreter. The check below reports this before starting the embedded builds.
+Host Rust tests do not require leaving the Python virtual environment.
+
 ```sh
 cd firmware
 cargo +stable test --lib --target x86_64-unknown-linux-gnu
+python3 -c 'import sys; assert sys.prefix == sys.base_prefix, "Leave the Python virtual environment before building ESP-IDF"'
 cargo build --release
 cargo build --release --features usb
 cargo fmt -- --check

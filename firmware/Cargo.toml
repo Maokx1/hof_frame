@@ -13,26 +13,21 @@ name = "firmware"
 test = false
 
 [dependencies]
-fontdue = { version = "0.9", default-features = false, features = ["std"] }
-log = "0.4"
+fontdue = { version = "0.9.5", default-features = false, features = ["std"] }
+log = "0.4.35"
 png = "0.18.1"
 
 [build-dependencies]
-embuild = { version = "0.33", features = ["espidf"] }
+embuild = { version = "0.33.7", features = ["espidf"] }
 
 [target.'cfg(target_os = "espidf")'.dependencies]
-esp-idf-svc = { version = "0.52.1" }
+esp-idf-svc = { version = "0.53.0" }
 
 [features]
 usb = []
 
 [lints.rust]
 dead_code = "allow"
-
-[patch.crates-io]
-esp-idf-hal = { git = "https://github.com/esp-rs/esp-idf-hal.git" }
-esp-idf-svc = { git = "https://github.com/esp-rs/esp-idf-svc.git" }
-esp-idf-sys = { git = "https://github.com/esp-rs/esp-idf-sys.git" }
 
 [profile.dev]
 opt-level = "z"
