@@ -1,0 +1,71 @@
+name: Continuous Integration
+
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - "**/README.md"
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+jobs:
+  rust-checks:
+    name: Rust Checks
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: firmware
+    strategy:
+      fail-fast: false
+      matrix:
+        action:
+          - command: build
+            args: --release
+          - command: build
+            args: --release --features usb
+          - command: fmt
+            args: --all -- --check --color always
+          - command: clippy
+            args: --lib --bin firmware --all-features -- -D warnings
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Setup Rust
+        uses: esp-rs/xtensa-toolchain@v1.6
+        with:
+          default: true
+          buildtargets: esp32s3
+          ldproxy: true
+      - name: Enable caching
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: firmware
+      - name: Run command
+        run: cargo ${{ matrix.action.command }} ${{ matrix.action.args }}
+
+  host-tests:
+    name: Host Tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: firmware
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - name: Enable caching
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: firmware
+      - name: Run host tests
+        run: cargo +stable test --lib --all-features --target x86_64-unknown-linux-gnu
+      - name: Lint host tests
+        run: cargo +stable clippy --lib --tests --all-features --target x86_64-unknown-linux-gnu -- -D warnings
