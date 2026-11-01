@@ -3,7 +3,7 @@ use super::*;
 #[test]
 fn n16r8_partition_budget_supports_seven_mb_and_preserves_frames() {
     let mut previous_end = 0x9000;
-    for line in include_str!("../partitions.csv").lines() {
+    for line in include_str!("../../partitions.csv").lines() {
         if line.starts_with('#') || line.is_empty() {
             continue;
         }
@@ -30,7 +30,7 @@ fn n16r8_partition_budget_supports_seven_mb_and_preserves_frames() {
         previous_end = offset + size;
     }
     assert_eq!(previous_end, 16 * 1024 * 1024);
-    assert!(PAYLOAD_OFFSET + FRAME_BYTES <= SLOT_BYTES);
+    const { assert!(PAYLOAD_OFFSET + FRAME_BYTES <= SLOT_BYTES) };
 }
 
 #[test]

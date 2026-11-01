@@ -353,13 +353,22 @@ at 60, 30, and 10 seconds rather than announcements on every timer tick.
 
 ```sh
 cd firmware
-cargo +stable test --manifest-path host-tests/Cargo.toml --target x86_64-unknown-linux-gnu
+cargo +stable test --lib --target x86_64-unknown-linux-gnu
 cargo build --release
 cargo build --release --features usb
 cargo fmt -- --check
 ```
 
-Host tests reuse actual library source without ESP-IDF dependencies: gestures,
+All firmware test code lives in [tests/unit](tests/unit), loaded as unit-test
+modules so tests can check private internals without exposing them as public API.
+The main Cargo manifest runs the host tests; no separate test crate is needed.
+Use your host target triple instead of `x86_64-unknown-linux-gnu` on other platforms.
+`--lib` excludes the hardware-only binary, and ESP-IDF dependencies and build
+setup apply only to the embedded target.
+CI workflows live in the repository-root [.github/workflows](../.github/workflows)
+and run host tests as well as embedded checks.
+
+Host tests exercise the actual library without ESP-IDF dependencies: gestures,
 KEY1 debounce, scheduling, safety, atomic storage/torn writes, decoder, overlay,
 and HTTP progress framing. They do not replace hardware acceptance.
 

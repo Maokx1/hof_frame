@@ -7,32 +7,36 @@ resolver = "2"
 rust-version = "1.82"
 default-run = "firmware"
 
+[[bin]]
+bench = false
+name = "firmware"
+test = false
+
+[dependencies]
+fontdue = { version = "0.9", default-features = false, features = ["std"] }
+log = "0.4"
+png = "0.18.1"
+
+[build-dependencies]
+embuild = { version = "0.33", features = ["espidf"] }
+
+[target.'cfg(target_os = "espidf")'.dependencies]
+esp-idf-svc = { version = "0.52.1" }
+
 [features]
 usb = []
 
-[[bin]]
-name = "firmware"
-harness = false # do not use the built-in cargo test harness -> resolve rust-analyzer errors
+[lints.rust]
+dead_code = "allow"
+
+[patch.crates-io]
+esp-idf-hal = { git = "https://github.com/esp-rs/esp-idf-hal.git" }
+esp-idf-svc = { git = "https://github.com/esp-rs/esp-idf-svc.git" }
+esp-idf-sys = { git = "https://github.com/esp-rs/esp-idf-sys.git" }
+
+[profile.dev]
+opt-level = "z"
+debug = true  # Symbols are nice, and they don't increase the size on Flash
 
 [profile.release]
 opt-level = "s"
-
-[profile.dev]
-debug = true    # Symbols are nice, and they don't increase the size on Flash
-opt-level = "z"
-[patch.crates-io]
-esp-idf-sys = { git = "https://github.com/esp-rs/esp-idf-sys.git" }
-esp-idf-hal = { git = "https://github.com/esp-rs/esp-idf-hal.git" }
-esp-idf-svc = { git = "https://github.com/esp-rs/esp-idf-svc.git" }
-
-[dependencies]
-log = "0.4"
-esp-idf-svc = { version = "0.52.1" }
-png = "0.18.1"
-fontdue = { version = "0.9", default-features = false, features = ["std"] }
-
-[build-dependencies]
-embuild = "0.33"
-
-[lints.rust]
-dead_code = "allow"

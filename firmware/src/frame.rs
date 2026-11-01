@@ -290,5 +290,5 @@ pub fn default_pixel(_x: usize, _y: usize) -> u8 {
 }
 
 #[cfg(test)]
-#[path = "frame_tests.rs"]
+#[path = "../tests/unit/frame.rs"]
 mod tests;
