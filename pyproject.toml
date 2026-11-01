@@ -18,6 +18,7 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools.packages.find]
 where = ["docs"]
 include = ["wiring_model*"]
+exclude = ["wiring_model.tests*"]
 
 [dependency-groups]
 dev = ["ruff>=0.16.10"]

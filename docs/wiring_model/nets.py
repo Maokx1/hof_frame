@@ -53,41 +53,22 @@ class Net(Enum):
             (Part.BATTERY_HOLDER, 2),
             (Part.STEP_UP_DOWN_CONVERTER, 2),
             (Part.CONTROLLER_5V_INPUT, 2),
-            (Part.ESP32_S3_SOC, 57),  # exposed ground pad
+            (Part.EE04_ADC_PADS, 2),
             (Part.VOLTAGE_SENSOR, 3),
         ),
     )
-    REG_5V = NetSpec(
-        name="REG_5V",
-        pins=((Part.STEP_UP_DOWN_CONVERTER, 1), (Part.SCHOTTKY_DIODE, 2)),
-        notes="S9V11MACMA output, before the diode.",
-    )
-    CTRL_5V = NetSpec(
-        name="CTRL_5V",
-        pins=((Part.SCHOTTKY_DIODE, 1), (Part.CONTROLLER_5V_INPUT, 1)),
-        notes=(
-            "After the diode, to the controller 5 V/VBUS input. The board regulates "
-            "it itself (not modelled), so the SoC's own supply pins stay open."
-        ),
+    EE04_5V = NetSpec(
+        name="EE04_5V",
+        pins=((Part.STEP_UP_DOWN_CONVERTER, 1), (Part.CONTROLLER_5V_INPUT, 1)),
+        notes="S9V11MACMA 5 V output to the EE04 USB-C input; no isolation diode.",
     )
     VBAT_SENSE = NetSpec(
         name="VBAT_SENSE",
-        pins=((Part.ESP32_S3_SOC, 9), (Part.VOLTAGE_SENSOR, 2)),
+        pins=((Part.EE04_ADC_PADS, 1), (Part.VOLTAGE_SENSOR, 2)),
         notes=(
-            "Proposed divider output to GPIO4 (ADC1_CH3), which the datasheet does "
-            "not assign to the display, SD card or buttons; confirm it is broken "
-            "out before wiring."
+            "External NiMH divider output to XIAO D9/GPIO8 (ADC1 candidate); "
+            "check pad access on the physical EE04 before wiring."
         ),
-    )
-    WAKE = NetSpec(
-        name="WAKE",
-        pins=((Part.ESP32_S3_SOC, 17), (Part.WAKE_BUTTON, 1)),
-        notes="GPIO12/ADC2_CH1 (RTC-capable). The display cable is not wired here.",
-    )
-    BOARD_3V3 = NetSpec(
-        name="BOARD_3V3",
-        pins=((Part.WAKE_BUTTON, 2),),
-        notes="On-board regulator output (regulator not modelled).",
     )
 
     @property

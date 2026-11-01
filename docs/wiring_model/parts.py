@@ -60,13 +60,13 @@ def unique_refs[E: Enum](enum_cls: type[E]) -> type[E]:
 class Part(Enum):
     """Every component in the design; each member's value is its `PartSpec`.
 
-    Power flows left to right and the ESP32 board sits at the right-hand end.
+    Power flows left to right into the EE04 board's USB-C input.
     """
 
     BATTERY_HOLDER = header(
         2,
         0.0,
-        ref="J1",
+        ref="J101",
         value="4xAAA holder",
         position=(40.64, 76.2),
         notes="4x AAA NiMH holder with integrated switch: 1 = BAT+ (switched), 2 = BAT-.",
@@ -74,7 +74,7 @@ class Part(Enum):
     STEP_UP_DOWN_CONVERTER = header(
         5,
         5.08,
-        ref="U1",
+        ref="U101",
         value="Pololu S9V11MACMA #2868",
         position=(91.44, 76.2),
         notes=(
@@ -82,49 +82,29 @@ class Part(Enum):
             "Its cutoff potentiometer drives EN; PG is unused."
         ),
     )
-    SCHOTTKY_DIODE = PartSpec(
-        ref="D1",
-        symbol="Device:D_Schottky",
-        value="1N5822",
-        footprint="Diode_THT:D_DO-201AD_P15.24mm_Horizontal",
-        position=(127.0, 55.88),
-        rotation=180,  # anode faces the converter
-        pin_offsets={2: (-3.81, 0.0), 1: (3.81, 0.0)},
-        notes="Pin 2 = anode (converter side), pin 1 = cathode (band, controller).",
-    )
     CONTROLLER_5V_INPUT = header(
         2,
         0.0,
-        ref="J2",
-        value="Board 5 V in (USB-C VBUS)",
-        position=(154.94, 55.88),  # pins on the board outline
-        notes="Board-level 5 V input of the ESP32-133C02; verify the real connector.",
+        ref="J102",
+        value="EE04 USB-C input (5 V, GND)",
+        position=(170.18, 68.58),
+        notes="Feed 5 V through USB-C. Do not connect computer USB while the converter is on.",
     )
-    ESP32_S3_SOC = PartSpec(
-        ref="U2",
-        symbol="Espressif:ESP32-S3",
-        value="ESP32-S3",
-        position=(210.82, 96.52),  # inside the board outline
-        # Library pin coordinates have y up; offsets here have y down.
-        pin_offsets={9: (33.02, -10.16), 17: (33.02, 10.16)},
+    EE04_ADC_PADS = header(
+        2,
+        0.0,
+        ref="J103",
+        value="EE04 XIAO pads (GPIO8/D9, GND)",
+        position=(170.18, 106.68),
         notes=(
-            "GPIO4/ADC1_CH3 is the proposed battery-sense pin, not confirmed "
-            "broken out; only wired pins are modelled and supply pins stay open."
+            "Abstract solder-pad interface, not a fitted connector. GPIO8/D9 is an "
+            "ADC1 candidate not used by the EE04 display configuration; verify access."
         ),
-    )
-    WAKE_BUTTON = PartSpec(
-        ref="SW2",
-        symbol="Switch:SW_Push",
-        value="SW2",
-        footprint="Button_Switch_SMD:SW_SPST_PTS645",
-        position=(261.62, 106.68),  # horizontal, pin 1 on the left
-        pin_offsets={1: (-5.08, 0.0), 2: (5.08, 0.0)},
-        notes="SW2 on the controller board: GPIO12, triggered by a high level.",
     )
     VOLTAGE_SENSOR = header(
         3,
         2.54,
-        ref="U3",
+        ref="U103",
         value="0-25 V divider module",
         position=(91.44, 127.0),
         notes="Passive 0-25 V (5:1) module: 1 = VIN+, 2 = S (output), 3 = GND.",

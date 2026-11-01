@@ -9,7 +9,7 @@ from wiring_model.parts import build_components
 
 @circuit(name="hof_frame", comments=False)
 def hof_frame_wiring():
-    """Battery -> S9V11MACMA -> 1N5822 -> ESP32-133C02, plus pack-voltage sense."""
+    """NiMH pack -> S9V11MACMA -> EE04, plus external pack-voltage sense."""
     components = build_components()
     for net in Net:
         circuit_net = CircuitNet(net.spec.name)

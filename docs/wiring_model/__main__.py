@@ -4,9 +4,8 @@ Mirrors the connection schedule in WIRING.md. Off-the-shelf modules are
 modelled as generic connectors, so each pin must match the received boards.
 Do not treat this as verified until the converter output has been measured.
 
-Needs the KiCad symbol libraries (Connector_Generic, Device, Switch) and
-Espressif.kicad_sym from espressif/kicad-libraries; run
-from the repository root:
+Needs the KiCad Connector_Generic and power symbol libraries; run from the
+repository root:
 
     KICAD_SYMBOL_DIR=.kicad/symbols uv run wiring        # net list
     KICAD_SYMBOL_DIR=.kicad/symbols uv run wiring --kicad # docs/kicad/hof_frame
@@ -23,12 +22,7 @@ from circuit_synth import Circuit
 from wiring_model.circuit import hof_frame_wiring
 from wiring_model.kicad import write_kicad_schematic
 
-REQUIRED_SYMBOL_LIBRARIES = (
-    "Connector_Generic",
-    "Device",
-    "Switch",
-    "Espressif",
-)
+REQUIRED_SYMBOL_LIBRARIES = ("Connector_Generic", "power")
 
 
 def main() -> None:
@@ -61,7 +55,7 @@ def main() -> None:
             f"{', '.join(missing)}. Download them as described in README.md."
         )
 
-    # write_kicad_schematic() changes directory, so a relative path would break
+    # circuit-synth generates in a temporary directory.
     os.environ["KICAD_SYMBOL_DIR"] = symbol_dir
 
     # circuit-synth's decorator is callable at runtime, but its type hints say Circuit.
