@@ -2,6 +2,7 @@ pub mod conversion;
 pub mod frame;
 pub mod gesture;
 pub mod overlay;
+pub mod panel_busy;
 pub mod png_decode;
 pub mod safety;
 pub mod schedule;

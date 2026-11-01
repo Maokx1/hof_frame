@@ -123,12 +123,13 @@ mod tests {
 
     #[test]
     fn alpha_and_sixteen_bit_are_supported() {
+        let (width, height) = conversion::dimensions(frame::Metadata::default().orientation);
         let encoded = png(
-            1200,
-            1600,
+            width as u32,
+            height as u32,
             png::ColorType::GrayscaleAlpha,
             png::BitDepth::Sixteen,
-            &vec![0; 1200 * 1600 * 4],
+            &vec![0; width * height * 4],
         );
         let mut output = vec![0; frame::FRAME_BYTES];
         decode(&encoded, Default::default(), &mut output, || Ok(())).unwrap();
@@ -137,22 +138,23 @@ mod tests {
 
     #[test]
     fn decodes_photo_sized_rgb_with_inflater_workspace() {
-        let mut pixels = vec![0; 1200 * 1600 * 3];
+        let (width, height) = conversion::dimensions(frame::Metadata::default().orientation);
+        let mut pixels = vec![0; width * height * 3];
         let mut random = 0x1234_5678_u32;
-        for (index, pixel) in pixels.chunks_exact_mut(3).enumerate() {
+        for byte in &mut pixels {
             random ^= random << 13;
             random ^= random >> 17;
             random ^= random << 5;
-            pixel.copy_from_slice(&[random as u8, (index % 1200) as u8, (index / 1200) as u8]);
+            *byte = random as u8;
         }
         let encoded = png(
-            1200,
-            1600,
+            width as u32,
+            height as u32,
             png::ColorType::Rgb,
             png::BitDepth::Eight,
             &pixels,
         );
-        assert!(encoded.len() > 1024 * 1024);
+        assert!(encoded.len() > width * height * 2);
         assert!(encoded.len() <= crate::upload::MAX_UPLOAD_BYTES);
         let mut output = vec![0; frame::FRAME_BYTES];
         decode(&encoded, Default::default(), &mut output, || Ok(())).unwrap();
@@ -161,7 +163,8 @@ mod tests {
 
     #[test]
     fn streams_exact_seven_mb_png_and_rejects_one_more_before_conversion() {
-        let mut pixels = vec![0; 1200 * 1600 * 3];
+        let (width, height) = conversion::dimensions(frame::Metadata::default().orientation);
+        let mut pixels = vec![0; width * height * 3];
         let mut random = 0x1234_5678_u32;
         for byte in &mut pixels {
             random ^= random << 13;
@@ -170,13 +173,13 @@ mod tests {
             *byte = random as u8;
         }
         let mut encoded = png(
-            1200,
-            1600,
+            width as u32,
+            height as u32,
             png::ColorType::Rgb,
             png::BitDepth::Eight,
             &pixels,
         );
-        assert!(encoded.len() > 4 * 1024 * 1024);
+        assert!(encoded.len() > width * height * 2);
         let end = encoded.split_off(encoded.len() - 12);
         let padding = crate::upload::MAX_UPLOAD_BYTES - encoded.len() - end.len() - 12;
         encoded.extend_from_slice(&(padding as u32).to_be_bytes());
@@ -213,12 +216,13 @@ mod tests {
 
     #[test]
     fn malformed_wrong_dimensions_and_deadline_are_rejected() {
+        let (width, height) = conversion::dimensions(frame::Metadata::default().orientation);
         let encoded = png(
-            1200,
-            1600,
+            width as u32,
+            height as u32,
             png::ColorType::Grayscale,
             png::BitDepth::Eight,
-            &vec![255; 1200 * 1600],
+            &vec![255; width * height],
         );
         let mut output = vec![0; frame::FRAME_BYTES];
         assert!(decode(&encoded, Default::default(), &mut output, || Err(
@@ -239,33 +243,35 @@ mod tests {
 
     #[test]
     fn indexed_png_expands_palette() {
+        let (width, height) = conversion::dimensions(frame::Metadata::default().orientation);
         let mut encoded = Vec::new();
-        let mut encoder = png::Encoder::new(&mut encoded, 1200, 1600);
+        let mut encoder = png::Encoder::new(&mut encoded, width as u32, height as u32);
         encoder.set_color(png::ColorType::Indexed);
         encoder.set_palette(vec![255, 0, 0]);
         encoder
             .write_header()
             .unwrap()
-            .write_image_data(&vec![0; 1200 * 1600])
+            .write_image_data(&vec![0; width * height])
             .unwrap();
         let mut output = vec![0; frame::FRAME_BYTES];
         decode(&encoded, Default::default(), &mut output, || Ok(())).unwrap();
-        assert!(output.iter().all(|byte| *byte == 0x33));
+        assert!(output.iter().all(|byte| *byte == 0x55));
     }
 
     #[test]
     fn interlacing_animation_corruption_and_dimension_bombs_fail() {
+        let (width, height) = conversion::dimensions(frame::Metadata::default().orientation);
         let original = png(
-            1200,
-            1600,
+            width as u32,
+            height as u32,
             png::ColorType::Grayscale,
             png::BitDepth::Eight,
-            &vec![0; 1200 * 1600],
+            &vec![0; width * height],
         );
         let mut output = vec![0x11; frame::FRAME_BYTES];
-        for (width, interlaced) in [(1200_u32, 1), (100_000, 0)] {
+        for (bad_width, interlaced) in [(width as u32 + 1, 1), (100_000, 0)] {
             let mut encoded = original.clone();
-            encoded[16..20].copy_from_slice(&width.to_be_bytes());
+            encoded[16..20].copy_from_slice(&bad_width.to_be_bytes());
             encoded[28] = interlaced;
             let crc = frame::crc32(&encoded[12..29]);
             encoded[29..33].copy_from_slice(&crc.to_be_bytes());
@@ -281,13 +287,13 @@ mod tests {
         assert!(decode(&encoded, Default::default(), &mut output, || Ok(())).is_err());
 
         let mut encoded = Vec::new();
-        let mut encoder = png::Encoder::new(&mut encoded, 1200, 1600);
+        let mut encoder = png::Encoder::new(&mut encoded, width as u32, height as u32);
         encoder.set_color(png::ColorType::Grayscale);
         encoder.set_animated(1, 0).unwrap();
         encoder
             .write_header()
             .unwrap()
-            .write_image_data(&vec![0; 1200 * 1600])
+            .write_image_data(&vec![0; width * height])
             .unwrap();
         assert!(decode(&encoded, Default::default(), &mut output, || Ok(())).is_err());
     }

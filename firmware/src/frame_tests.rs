@@ -337,28 +337,25 @@ fn zero_and_exhausted_generations_are_not_wrapped() {
 }
 
 #[test]
-fn landscape_rotates_clockwise_into_native_portrait_geometry() {
+fn landscape_is_native_and_portrait_rotates_clockwise_into_it() {
     assert_eq!(
         native_coordinates(Orientation::Landscape, 0, 0),
-        Some((1199, 0))
-    );
-    assert_eq!(
-        native_coordinates(Orientation::Landscape, 1599, 0),
-        Some((1199, 1599))
-    );
-    assert_eq!(
-        native_coordinates(Orientation::Landscape, 0, 1199),
         Some((0, 0))
     );
     assert_eq!(
-        native_coordinates(Orientation::Landscape, 1599, 1199),
-        Some((0, 1599))
+        native_coordinates(Orientation::Landscape, 799, 479),
+        Some((799, 479))
     );
-    assert_eq!(native_coordinates(Orientation::Landscape, 1600, 0), None);
     assert_eq!(
-        native_coordinates(Orientation::Portrait, 1199, 1599),
-        Some((1199, 1599))
+        native_coordinates(Orientation::Portrait, 0, 0),
+        Some((799, 0))
     );
+    assert_eq!(
+        native_coordinates(Orientation::Portrait, 479, 799),
+        Some((0, 479))
+    );
+    assert_eq!(native_coordinates(Orientation::Landscape, 800, 0), None);
+    assert_eq!(native_coordinates(Orientation::Portrait, 480, 0), None);
     assert_eq!(pixel(&[0x11], 0, 0), None);
     assert_eq!(pixel(&vec![0x11; FRAME_BYTES], WIDTH, 0), None);
 }

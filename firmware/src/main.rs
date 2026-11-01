@@ -1,4 +1,4 @@
-//! Display bring-up with SW7 gesture handling and scheduled deep sleep.
+//! EE04 display bring-up with KEY0 gesture handling and scheduled deep sleep.
 
 mod epd;
 mod frame_flash;
@@ -95,10 +95,16 @@ fn recover_interrupted_refresh(now_us: u64, reset_reason: ResetReason) -> bool {
     interrupted
 }
 
+enum DisplayOutcome {
+    Displayed,
+    #[cfg(feature = "usb")]
+    Failed(EspError),
+}
+
 fn refresh_panel_with(
     safety: &mut SafetyGuard<safety_nvs::NvsSafetyStore>,
     color_at: impl Fn(usize, usize) -> u8,
-) -> Result<(), EspError> {
+) -> Result<DisplayOutcome, EspError> {
     set_work_phase(safety, WorkPhase::Display)?;
     log::info!("creating panel interface; panel load switch will turn on");
     let epd = match epd::Epd::new() {
@@ -126,36 +132,40 @@ fn refresh_panel_with(
         Ok(())
     })();
 
-    let refresh_failed = refresh.is_err();
+    if let Err(error) = refresh {
+        log::error!("panel display operation failed: {error:?}");
+    }
     let phase = set_work_phase(safety, WorkPhase::PanelCleanup);
     let power_off = epd.power_off();
-    let result = match (refresh, power_off) {
-        (Err(refresh_error), Err(power_off_error)) => {
-            log::error!("panel power-off also failed: {power_off_error:?}");
-            Err(refresh_error)
-        }
-        (Err(refresh_error), Ok(())) => Err(refresh_error),
-        (Ok(()), Err(power_off_error)) => Err(power_off_error),
-        (Ok(()), Ok(())) => phase,
-    };
     let cleanup = epd.close();
-    if refresh_failed {
-        // Cleanup must run even on failure; retain the operation that failed.
+    // Only a display operation failure is recoverable, never failed cleanup.
+    phase?;
+    if let Err(error) = power_off {
+        log::error!("panel power-off failed: {error:?}; work blocked");
+        if let Err(cleanup_error) = cleanup {
+            log::error!("panel SPI cleanup also failed: {cleanup_error:?}");
+        }
+        return Err(error);
+    }
+    cleanup?;
+    #[cfg(feature = "usb")]
+    if let Err(error) = refresh {
+        log::error!(
+            "USB display refresh failed: {error:?}; panel OFF, SPI released; continuing execution"
+        );
+        return Ok(DisplayOutcome::Failed(error));
+    }
+    #[cfg(not(feature = "usb"))]
+    if refresh.is_err() {
         set_work_phase(safety, WorkPhase::Display)?;
     }
-    match (result, cleanup) {
-        (Err(error), Err(cleanup_error)) => {
-            log::error!("panel SPI cleanup also failed: {cleanup_error:?}");
-            Err(error)
-        }
-        (Err(error), Ok(())) | (Ok(()), Err(error)) => Err(error),
-        (Ok(()), Ok(())) => Ok(()),
-    }
+    refresh?;
+    Ok(DisplayOutcome::Displayed)
 }
 
 fn refresh_saved_frame(
     safety: &mut SafetyGuard<safety_nvs::NvsSafetyStore>,
-) -> Result<(), EspError> {
+) -> Result<DisplayOutcome, EspError> {
     set_work_phase(safety, WorkPhase::LoadFrame)?;
     let mut storage = frame_flash::FlashFrames::open()?;
     let scan = storage.load().map_err(|error| {
@@ -247,7 +257,7 @@ fn sleep_until_refresh(button: &PinDriver<'_, RtcInput>) -> ! {
         }
 
         if now.duration_since(release_started) >= BUTTON_RELEASE_TIMEOUT {
-            log::warn!("SW7 remained pressed for 60 s; disabling button wake until timer wake");
+            log::warn!("KEY0 remained pressed for 60 s; disabling button wake until timer wake");
             break false;
         }
         FreeRtos::delay_ms(BUTTON_POLL_MS);
@@ -264,14 +274,14 @@ fn sleep_until_refresh(button: &PinDriver<'_, RtcInput>) -> ! {
     if button_released {
         deep_sleep = deep_sleep
             .wakeup_on_rtc(button, RtcWakeLevel::AllLow)
-            .expect("failed to configure SW7 wake");
+            .expect("failed to configure KEY0 wake");
     }
 
     log::info!(
         "entering deep sleep; next refresh in {} s{}",
         remaining_us / 1_000_000,
         if button_released {
-            " with SW7 wake enabled"
+            " with KEY0 wake enabled"
         } else {
             " with timer wake only"
         }
@@ -306,7 +316,8 @@ fn usb_refresh(
         "scheduled refresh"
     };
     log::info!("{source}: starting REAL saved-frame refresh; Wi-Fi OFF; USB connected");
-    if let Err(error) = refresh_saved_frame(safety) {
+    let outcome = refresh_saved_frame(safety);
+    if let Err(error) = outcome {
         log::error!(
             "{source}: FAILED: {error:?}; daily deadline unchanged; no automatic physical retry"
         );
@@ -328,6 +339,11 @@ fn usb_refresh(
         safety_storage_fault(error);
     }
     let completed_at_us = rtc_time_us();
+    if let Ok(DisplayOutcome::Failed(error)) = outcome {
+        schedule.defer_retry(completed_at_us, USB_REFRESH_INTERVAL_US);
+        log::error!("{source}: display FAILED: {error:?}; cleanup complete, NVS clean; continuing; next scheduled attempt in 60 s");
+        return;
+    }
     schedule.refresh_succeeded(completed_at_us, manual);
     log::info!(
         "{}: SUCCESS; panel OFF; Wi-Fi OFF; NVS clean; daily deadline restarted; next timer in {} s, deadline={} us",
@@ -382,7 +398,8 @@ fn process_upload(
     }
     log::info!("display: verified save; AP ON; starting REAL panel refresh");
     progress(ProgressStage::Displaying);
-    if let Err(error) = refresh_saved_frame(safety) {
+    let outcome = refresh_saved_frame(safety);
+    if let Err(error) = outcome {
         if let Err(power_error) = epd::Epd::disable_panel_power() {
             log::error!("display: emergency panel power cutoff failed: {power_error:?}");
             return Err(ProcessingError::Fatal(format!(
@@ -392,6 +409,19 @@ fn process_upload(
         return Err(ProcessingError::Fatal(format!(
                 "Image saved, but display refresh failed: {error}. Panel power is off; no automatic retry."
             )));
+    }
+    #[cfg(feature = "usb")]
+    if let Ok(DisplayOutcome::Failed(error)) = outcome {
+        set_work_phase(safety, WorkPhase::SafetyCleanup).map_err(|error| {
+            ProcessingError::Fatal(format!("Safety diagnostic cleanup failed: {error}"))
+        })?;
+        safety
+            .finish_work()
+            .map_err(|error| ProcessingError::Fatal(format!("Safety cleanup failed: {error:?}")))?;
+        schedule.defer_retry(rtc_time_us(), USB_REFRESH_INTERVAL_US);
+        return Err(ProcessingError::DisplayFailed(format!(
+            "Image saved, but display refresh failed: {error}. Panel power is off. USB operation continues; next scheduled attempt in 60 s."
+        )));
     }
     progress(ProgressStage::Displayed);
     set_work_phase(safety, WorkPhase::SafetyCleanup).map_err(|error| {
@@ -414,10 +444,10 @@ fn main() {
 
     epd::Epd::disable_panel_power().expect("gesture test failed to disable panel power");
     let peripherals = Peripherals::take().expect("peripherals already taken");
-    let button = PinDriver::rtc_input(peripherals.pins.gpio13, Pull::Up)
-        .expect("failed to configure SW7/GPIO13 as an RTC input");
-    let fault_button = PinDriver::rtc_input(peripherals.pins.gpio12, Pull::Up)
-        .expect("failed to configure SW8/GPIO12 as an input");
+    let button = PinDriver::rtc_input(peripherals.pins.gpio2, Pull::Up)
+        .expect("failed to configure KEY0/GPIO2 as an RTC input");
+    let fault_button = PinDriver::rtc_input(peripherals.pins.gpio3, Pull::Up)
+        .expect("failed to configure KEY1/GPIO3 as an input");
     let mut fault_switch =
         firmware::gesture::FaultSwitch::new(Instant::now(), fault_button.is_low());
     let mut simulated_fault = false;
@@ -469,20 +499,20 @@ fn main() {
         "upload development mode: MOCK deep sleep; USB stays connected; panel OFF, Wi-Fi OFF"
     );
     log::warn!("USB mode: REAL upload/manual/scheduled display; simulated deep sleep; timer=60 s from completion; manual limit=1 h; production remains 24 h / 1 h");
-    log::warn!("USB safety: simulated fault initially OFF; SW8 toggles while idle; runtime safety namespace=hof_usb, state={:?}; production hof_safety untouched; SW8 cannot clear real faults; battery unknown; USB power only", safety.state());
+    log::warn!("USB safety: simulated fault initially OFF; KEY1 toggles while idle; runtime safety namespace=hof_usb, state={:?}; production hof_safety untouched; KEY1 cannot clear real faults; battery unknown; USB power only", safety.state());
     let mut schedule = RefreshSchedule::new(rtc_time_us());
     let mut button_armed = false;
     let mut released_since = None;
     let mut next_status_us = 0;
     log::info!(
-        "mock PrepareSleep: waiting for SW7 release; initial timer in {} s",
+        "mock PrepareSleep: waiting for KEY0 release; initial timer in {} s",
         USB_REFRESH_INTERVAL_US / 1_000_000
     );
     loop {
         let now_us = rtc_time_us();
         if fault_switch.sample(Instant::now(), fault_button.is_low()) {
             simulated_fault = !simulated_fault;
-            log::warn!("USB SW8: simulated fault={simulated_fault}; real safety={:?}; production latch unchanged", safety.state());
+            log::warn!("USB KEY1: simulated fault={simulated_fault}; real safety={:?}; production latch unchanged", safety.state());
         }
         if !simulated_fault && schedule.due(now_us, USB_REFRESH_INTERVAL_US) {
             log::info!("USB: TIMER wake; no button gesture required");
@@ -497,7 +527,7 @@ fn main() {
             } else if let Some(released_at) = released_since {
                 if Instant::now().duration_since(released_at) >= BUTTON_DEBOUNCE {
                     button_armed = true;
-                    log::info!("mock DeepSleep: READY; press SW7 to start the next gesture");
+                    log::info!("mock DeepSleep: READY; press KEY0 to start the next gesture");
                 }
             } else {
                 released_since = Some(Instant::now());
@@ -507,10 +537,10 @@ fn main() {
             released_since = None;
             let wake_at = Instant::now();
             let deadline_before = schedule.deadline_us(USB_REFRESH_INTERVAL_US);
-            log::info!("mock Boot: SW7 wake, press 1");
+            log::info!("mock Boot: KEY0 wake, press 1");
             let gesture = classify_gesture(&button, wake_at);
             log::info!(
-                "SW7 gesture test: {gesture:?} after {:.3} s; panel OFF, Wi-Fi OFF",
+                "KEY0 gesture test: {gesture:?} after {:.3} s; panel OFF, Wi-Fi OFF",
                 wake_at.elapsed().as_secs_f32()
             );
             match gesture {
@@ -562,7 +592,7 @@ fn main() {
                     );
                 }
             }
-            log::info!("mock PrepareSleep: waiting for SW7 release; timer stays active");
+            log::info!("mock PrepareSleep: waiting for KEY0 release; timer stays active");
             continue;
         }
 
@@ -593,8 +623,8 @@ fn main() {
     esp_idf_svc::log::EspLogger::initialize_default();
 
     let peripherals = Peripherals::take().expect("peripherals already taken");
-    let button = PinDriver::rtc_input(peripherals.pins.gpio13, Pull::Up)
-        .expect("failed to configure SW7/GPIO13 as an RTC input");
+    let button = PinDriver::rtc_input(peripherals.pins.gpio2, Pull::Up)
+        .expect("failed to configure KEY0/GPIO2 as an RTC input");
 
     let reset_reason = ResetReason::get();
     let wake_reason = WakeupReason::get();
@@ -701,7 +731,7 @@ fn main() {
                     }
                 }
                 Gesture::Sleep => {
-                    log::info!("short or incomplete SW7 gesture; returning to sleep");
+                    log::info!("short or incomplete KEY0 gesture; returning to sleep");
                     false
                 }
             }
@@ -731,7 +761,7 @@ fn main() {
         }
         update_retained_state(|state| state.refresh_in_progress = 1);
         match refresh_saved_frame(&mut safety) {
-            Ok(()) => {
+            Ok(DisplayOutcome::Displayed) => {
                 if let Err(error) = set_work_phase(&mut safety, WorkPhase::SafetyCleanup) {
                     safety_storage_fault(error);
                 }

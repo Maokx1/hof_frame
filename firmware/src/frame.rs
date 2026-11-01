@@ -1,5 +1,5 @@
-pub const WIDTH: usize = 1200;
-pub const HEIGHT: usize = 1600;
+pub const WIDTH: usize = 800;
+pub const HEIGHT: usize = 480;
 pub const FRAME_BYTES: usize = WIDTH * HEIGHT / 2;
 pub const SLOT_BYTES: usize = 1024 * 1024;
 pub const STORAGE_BYTES: usize = 2 * SLOT_BYTES;
@@ -32,7 +32,7 @@ pub struct Metadata {
 impl Default for Metadata {
     fn default() -> Self {
         Self {
-            orientation: Orientation::Portrait,
+            orientation: Orientation::Landscape,
             battery_corner: Corner::TopRight,
         }
     }
@@ -278,9 +278,9 @@ pub fn pixel(packed: &[u8], x: usize, y: usize) -> Option<u8> {
 
 pub fn native_coordinates(orientation: Orientation, x: usize, y: usize) -> Option<(usize, usize)> {
     match orientation {
-        Orientation::Portrait if x < WIDTH && y < HEIGHT => Some((x, y)),
-        // Clockwise rotation of a 1600 x 1200 landscape image.
-        Orientation::Landscape if x < HEIGHT && y < WIDTH => Some((WIDTH - 1 - y, x)),
+        Orientation::Landscape if x < WIDTH && y < HEIGHT => Some((x, y)),
+        // Rotate a portrait layout clockwise into the panel's native landscape orientation.
+        Orientation::Portrait if x < HEIGHT && y < WIDTH => Some((WIDTH - 1 - y, x)),
         _ => None,
     }
 }

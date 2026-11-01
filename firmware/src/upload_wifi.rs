@@ -23,6 +23,8 @@ pub struct Received {
 pub enum ProcessingError {
     Retry(String),
     Fatal(String),
+    #[cfg(feature = "usb")]
+    DisplayFailed(String),
 }
 
 pub fn setup(
@@ -406,6 +408,19 @@ pub fn run(
                                 }
                             }
                             crate::set_work_phase(safety, firmware::safety::WorkPhase::Upload)?;
+                        }
+                        #[cfg(feature = "usb")]
+                        Err(ProcessingError::DisplayFailed(message)) => {
+                            log::error!("UploadWindow: {message}");
+                            if connected {
+                                if let Err(error) =
+                                    upload::write_progress(stream, ProgressEvent::Fatal(&message))
+                                {
+                                    log::warn!("UploadWindow: display failure response could not be delivered: {error}");
+                                }
+                            }
+                            FreeRtos::delay_ms(upload::RESULT_GRACE.as_millis() as u32);
+                            return Ok(());
                         }
                         Err(ProcessingError::Fatal(message)) => {
                             log::error!("UploadWindow: processing safety fault: {message}");

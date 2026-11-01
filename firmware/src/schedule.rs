@@ -152,6 +152,23 @@ mod tests {
     }
 
     #[test]
+    fn usb_display_failure_defers_a_full_interval_without_recording_success() {
+        for failed_at in [20, USB_INTERVAL_US, USB_INTERVAL_US + 10] {
+            let mut schedule = RefreshSchedule::new(0);
+            schedule.defer_retry(failed_at, USB_INTERVAL_US);
+            assert_eq!(schedule.last_refresh_us, 0);
+            assert!(schedule.manual_allowed(failed_at, MANUAL_LIMIT_US));
+            assert!(!schedule.due(failed_at + USB_INTERVAL_US - 1, USB_INTERVAL_US));
+            assert!(schedule.due(failed_at + USB_INTERVAL_US, USB_INTERVAL_US));
+            schedule.refresh_succeeded(failed_at + 1, false);
+            assert_eq!(
+                schedule.deadline_us(USB_INTERVAL_US),
+                failed_at + 1 + USB_INTERVAL_US
+            );
+        }
+    }
+
+    #[test]
     fn success_clears_recovery_cooldown() {
         let mut schedule = RefreshSchedule::new(0);
         schedule.defer_retry(50, 100);

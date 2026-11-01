@@ -67,7 +67,7 @@ function startCountdown(message = '') {
       bindText(document.getElementById('session-announcement'), t('Pozostało {seconds} sekund na wysłanie zdjęcia.', { seconds }));
     }
     if (!seconds) {
-      sessionState(t('Czas na wysłanie minął'), '0:00', t('Przytrzymaj SW7 przez 3 sekundy, aby ponownie otworzyć hotspot.'));
+      sessionState(t('Czas na wysłanie minął'), '0:00', t('Przytrzymaj KEY0 przez 3 sekundy, aby ponownie otworzyć hotspot.'));
       bindText(document.getElementById('session-announcement'), t('Czas na wysłanie zdjęcia minął.'));
       document.getElementById('send').disabled = true;
     }
@@ -102,7 +102,7 @@ form.addEventListener('submit', async event => {
     try {
       const canvas = document.createElement('canvas');
       const landscape = orientation === 'landscape';
-      canvas.width = landscape ? 1600 : 1200; canvas.height = landscape ? 1200 : 1600;
+      canvas.width = landscape ? 800 : 480; canvas.height = landscape ? 480 : 800;
       const ctx = canvas.getContext('2d');
       if (!ctx) throw new Error(resolveText(t('Przeglądarka nie udostępnia narzędzia do obróbki obrazu.')));
       ctx.fillStyle = 'white'; ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -125,7 +125,7 @@ form.addEventListener('submit', async event => {
   }
   if (performance.now() >= deadline) {
     failProgress();
-    bindText(status, t('Podczas przygotowywania zdjęcia upłynął czas hotspotu. Przytrzymaj SW7 przez 3 sekundy, aby otworzyć go ponownie.'));
+    bindText(status, t('Podczas przygotowywania zdjęcia upłynął czas hotspotu. Przytrzymaj KEY0 przez 3 sekundy, aby otworzyć go ponownie.'));
     return;
   }
   showProgress(0, 0, t('Wysyłanie'));

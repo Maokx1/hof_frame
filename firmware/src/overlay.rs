@@ -143,8 +143,8 @@ impl StatusOverlay {
             return None;
         }
         let (x, y) = match self.metadata.orientation {
-            Orientation::Portrait => (native_x, native_y),
-            Orientation::Landscape => (native_y, frame::WIDTH - 1 - native_x),
+            Orientation::Landscape => (native_x, native_y),
+            Orientation::Portrait => (native_y, frame::WIDTH - 1 - native_x),
         };
         let x = x.checked_sub(self.left)?;
         let y = y.checked_sub(self.top)?;

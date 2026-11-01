@@ -1,7 +1,8 @@
 # HOF-Frame firmware
 
-Rust / ESP-IDF firmware for the ESP32-S3-WROOM-1 N16R8 and a 1200 x 1600
-Spectra 6 panel. There are exactly two firmware modes.
+Rust / ESP-IDF firmware for the Seeed XIAO ePaper Display Board EE04, XIAO
+ESP32-S3 Plus, and 7.3-inch 800 x 480 Spectra 6 panel. There are exactly two
+firmware modes.
 
 ## Modes and flashing
 
@@ -13,7 +14,7 @@ Spectra 6 panel. There are exactly two firmware modes.
 | Manual-refresh limit | One hour after manual completion | One hour after manual completion |
 | Battery | Measurement/protection not yet qualified | Explicitly simulated safe for development; label remains `?%` |
 | Runtime recovery | Persistent `hof_safety` NVS | `hof_usb`, explicitly reset to Clean on reboot |
-| SW8 | Unused; no simulation behavior | Toggles separate simulated fault while idle |
+| KEY1 / GPIO3 | Unused; no simulation behavior | Toggles separate simulated fault while idle |
 
 **Production is the target operating mode, not a claim of battery readiness.**
 Use stable USB/bench power until ADC wiring, calibration, thresholds, and the
@@ -42,19 +43,19 @@ have been removed. Use `usb` instead. All automated host tests remain.
 
 ## Buttons and USB simulated fault
 
-The fitted SW7/GPIO13 and SW8/GPIO12 switches are pull-up, active-low inputs:
-released HIGH, pressed LOW. Button debounce is 50 ms.
+The EE04 user buttons KEY0/GPIO2, KEY1/GPIO3, and KEY2/GPIO5 are active-low
+inputs: released HIGH, pressed LOW. Button debounce is 50 ms.
 
-- Hold the waking SW7 press for three seconds to open the upload window.
+- Hold the waking KEY0 press for three seconds to open the upload window.
 - Three presses within three seconds, counting the waking press, request a
   real refresh of the saved photo with Wi-Fi off.
-- Other SW7 gestures do no work. Held SW7 must be released before rearming.
-- In USB mode, press SW8 while idle to toggle the **simulated fault**. It
-  starts OFF each boot. Holding SW8 does not repeatedly toggle it.
+- Other KEY0 gestures do no work. Held KEY0 must be released before rearming.
+- In USB mode, press KEY1 while idle to toggle the **simulated fault**. It
+  starts OFF each boot. Holding KEY1 does not repeatedly toggle it.
 - When simulated fault is ON, uploads, manual refresh, and timer refresh are
   blocked. Clearing it does not move the existing refresh deadline; an overdue
   timer can refresh immediately. It never changes persistent recovery records.
-- SW8 is polled while idle, not inside synchronous gesture/upload/display
+- KEY1 is polled while idle, not inside synchronous gesture/upload/display
   work. It is not an emergency-stop button or cancellation of an active upload.
   Make fault-injection presses after `READY` while no work is running.
 
@@ -67,6 +68,21 @@ expiry without a successful display can leave the scheduled refresh already due.
 The accelerated USB timer physically refreshes repeatedly. Stop bench work
 when finished; closing the serial monitor alone does not stop firmware.
 Do not remove power mid-refresh.
+
+## EE04 panel and power pins
+
+The firmware targets the EE04 50-pin connector and the Seeed 7.3-inch
+800 x 480 Spectra 6 panel with its ED2208 controller. The panel jumper must be
+set to 50-pin. The display interface uses CS GPIO44, DC GPIO10, RST GPIO38,
+MOSI GPIO9 (`D10`), SCK GPIO7 (`D8`), BUSY GPIO4, and active-high panel enable
+GPIO43.
+
+The frame uses four AAA NiMH cells and the external 5 V converter through
+EE04 USB-C. Leave the JST Li-ion connector empty: the board's built-in battery
+ADC monitors only a single-cell Li-ion pack on that connector. The NiMH pack
+voltage divider is planned for D9/GPIO8; verify pad access and calibration
+before enabling battery protection. See [WIRING.md](../docs/WIRING.md) and
+[PLAN.md](../docs/PLAN.md#board-interface).
 
 ## Runtime safety and recovery
 
@@ -88,10 +104,17 @@ not battery-qualified recovery; USB must not be used for battery operation.
 Before that reset, USB mode also prints a **read-only snapshot** of the
 production `hof_safety` NVS state and diagnostic records. It does not change
 the production namespace. The current reset reason is logged separately. The
-simulated fault is separate from this real runtime guard: **SW8 cannot clear
-actual storage, panel, radio, or cleanup faults**. Runtime failures stop
-without automatic retry for the rest of that USB session; reboot starts a new
-USB session. SW8 cannot perform that runtime recovery. Production faults
+simulated fault is separate from this real runtime guard: **KEY1 cannot clear
+actual storage, radio, or cleanup faults**. In USB mode, a panel init/show
+failure is logged but does not latch or halt the ESP32 if panel power-off,
+SPI release, and durable safety cleanup all succeed. Buttons and uploads
+remain available; the next scheduled panel attempt is deferred until 60 seconds
+after failure cleanup. Failed attempts do not count as successful refreshes
+or consume the manual-refresh limit. Uploads explicitly report that the image
+was saved but display refresh failed; they do not report display success, and
+the AP closes after the normal result grace period.
+Other runtime failures stop without automatic retry for the rest of that USB
+session; reboot starts a new USB session. KEY1 cannot perform that runtime recovery. Production faults
 remain blocked across reboot. NVS read/write failures still block boot and
 never trigger automatic partition erasure.
 
@@ -146,7 +169,7 @@ production safety NVS snapshot (read-only): state=Some(161), diag_v1 raw=Some(35
 
 USB archives an inferred interruption before clearing its runtime guard; the
 historical fault remains visible on later boots until another real fault
-replaces it. SW8 simulation does not create or clear these diagnostics.
+replaces it. KEY1 simulation does not create or clear these diagnostics.
 Production still latches rather than granting recovery.
 
 There is no wall-clock timestamp or stored error string. A reason/phase identifies
@@ -165,11 +188,11 @@ arms only the RTC timer; a later wake rechecks button release.
 
 ## Upload and display
 
-1. Hold SW7, join WPA2 **HOF-Frame**, and stay connected despite the "no internet"
+1. Hold KEY0, join WPA2 **HOF-Frame**, and stay connected despite the "no internet"
    warning. One client at a time.
 2. Open **[http://192.168.4.1](http://192.168.4.1)**. DHCP uses the explicitly configured
    `192.168.4.1/24` subnet; the ready log checks the actual interface address.
-3. Select portrait (1200 x 1600) or landscape (1600 x 1200), Stretch or Fit,
+3. Select portrait (480 x 800) or landscape (800 x 480), Stretch or Fit,
    and the battery-box corner. Choose PNG/JPEG up to **7 MB (7,000,000 bytes)**.
 4. The browser normalizes to display-sized PNG, also limited to
    **7 MB (7,000,000 bytes)**.
@@ -184,6 +207,25 @@ arms only the RTC timer; a later wake rechecks button release.
 Both modes always physically refresh after a successful upload. There is no
 save-only mode, fake percentage preview, persistent red error mark, or extra
 fallback refresh after upload rejection.
+
+The display waveform must assert BUSY (GPIO4 LOW) within one second, then return
+HIGH within 120 seconds. An initially HIGH pin is not proof of completion.
+A LOW pulse shorter than one second is also rejected as implausible: the panel
+datasheet specifies **12 seconds typical at 25 C**. The one-second guard is a
+conservative software sanity check, not a vendor-specified minimum or an added
+delay that makes a failed refresh succeed.
+Serial logs identify assertion and completion in milliseconds and read each
+controller's three raw `0xF2` status bytes after init, power-on, and the waveform
+(including waveform failure if BUSY is HIGH; no reads while BUSY stays LOW).
+Only the vendor example's ready bit is labelled;
+other bits are not decoded without a register specification. A ready bit alone
+does not confirm panel voltage, waveform execution, or a visible image update.
+In production, failure blocks further work through the runtime safety guard
+with no automatic retry. USB mode continues after successful cleanup as
+described above; a disconnected panel can therefore be attempted again on each
+60-second schedule. Check panel power, the supplied display cable, and SPI/reset connections
+with power off. This check is shared by USB and production and still needs
+physical board confirmation; it cannot diagnose an electrical cause.
 
 The POST uses HTTP chunked `application/x-hof-progress` text. Initial `200 OK`
 starts streaming; it does **not** mean work succeeded. Flushed lines report
@@ -217,7 +259,7 @@ additional bounded cleanup; the browser waits up to 1,211 seconds.
 
 The device decodes static non-interlaced display-sized PNG by rows, composites
 alpha over white, applies ordered 4 x 4 Bayer six-color dithering, and rotates
-landscape clockwise into native portrait order. Browser JPEG support uses PNG
+portrait clockwise into native landscape order. Browser JPEG support uses PNG
 normalization; direct JPEG reception passes signature checks but fails decoding.
 APNG, wrong dimensions, corrupt and interlaced PNGs are rejected before commit.
 PNG tracked allocations are capped at 128 KiB, not including all inflater
@@ -318,7 +360,7 @@ cargo fmt -- --check
 ```
 
 Host tests reuse actual library source without ESP-IDF dependencies: gestures,
-SW8 debounce, scheduling, safety, atomic storage/torn writes, decoder, overlay,
+KEY1 debounce, scheduling, safety, atomic storage/torn writes, decoder, overlay,
 and HTTP progress framing. They do not replace hardware acceptance.
 
 Previously user-confirmed on USB hardware: upload/display with Wi-Fi on, live
@@ -326,7 +368,7 @@ four-stage web progress, compact overlay, triple-press refresh, truncated-PNG
 rejection/retry, invalid-signature `415`/retry, declared-oversize `413`/retry,
 idle expiry, and previous-photo preservation. The PSRAM test optimization is
 confirmed at 1,574-1,585 ms. Those observations predate the two-mode migration.
-The new USB SW8 toggle, real scheduled cycle, and production sleep/wake still
+The new USB KEY1 toggle, real scheduled cycle, and production sleep/wake still
 need acceptance. Disconnect/stall cases, peak power/memory, power-cut durability,
 panel faults, and battery operation remain unqualified.
 

@@ -20,18 +20,24 @@ implemented behavior and build instructions.
   one-hour manual limit. Initialization starts a fresh awake schedule without
   immediate boot refresh. This does not qualify RTC retention, wake causes,
   sleep current, battery power, or real battery recovery.
-- USB's simulated fault starts OFF each boot. A debounced active-low SW8/GPIO12
+- USB's simulated fault starts OFF each boot. A debounced active-low KEY1/GPIO3
   press while idle toggles it, blocking uploads and manual/timer refreshes.
   Holding the switch does not repeat. Clearing the simulated fault retains
   the original deadline; overdue scheduled work may run immediately.
-  SW8 polling is suspended during synchronous gesture/upload/display work;
+  KEY1 polling is suspended during synchronous gesture/upload/display work;
   it does not interrupt active work or act as an emergency stop.
 - Runtime safety is separate: production uses persistent `hof_safety`; USB
   uses `hof_usb` but logs and resets its previous state to Clean each reboot,
   including after interrupted work or brownout. This explicit development
   policy is not battery-qualified recovery and requires USB/bench power.
-  Actual faults stop work for the rest of the running session; SW8 cannot
-  clear them. NVS errors still block boot. Production latch behavior remains
+  USB panel init/show failures are nonfatal only after successful panel
+  power-off, SPI release, and durable safety cleanup. They are logged in serial
+  output, not stored as latched faults. Uploads report saved-but-not-displayed
+  and close the AP normally; buttons remain available and the next scheduled
+  attempt waits 60 seconds after failure cleanup. No display success or manual
+  limit consumption is recorded. Storage, setup, radio, and cleanup faults
+  still stop work for the rest of the session; KEY1 cannot clear them.
+  NVS errors still block boot. Production latch behavior remains
   unchanged; USB never reads/clears it. No partition erasure is performed.
 - A Working marker precedes work; successful cleanup commits Clean before
   final browser success. AP shutdown failure after success remains an explicit
@@ -41,14 +47,14 @@ implemented behavior and build instructions.
   Working-at-boot records Interrupted; actual brownout takes precedence;
   invalid safety metadata and explicit runtime faults have distinct reasons.
   Phases cover setup, upload, decode, save, frame load, display, panel/safety/
-  radio cleanup, idle, and unknown legacy work. SW8 affects none of these
+  radio cleanup, idle, and unknown legacy work. KEY1 affects none of these
   persistent diagnostic records. No timestamp or arbitrary error text is stored.
   Missing legacy diagnostics cannot reconstruct a historical cause; invalid
   diagnostics and read/write failures explicitly block work. Multi-key NVS
   writes are not transactional; interruption can leave incomplete history.
   NVS power-loss behavior still needs qualification; missing metadata cannot
   distinguish first use from external erasure.
-- SW7/GPIO13 is active-low with pull-up: hold three seconds for upload, triple
+- KEY0/GPIO2 is active-low with pull-up: hold three seconds for upload, triple
   press within three seconds for manual refresh. Debounce is 50 ms. Production
   handles a stuck switch with a 60-second release timeout and timer-only sleep.
 - AP is one-client WPA2 HOF-Frame at checked `192.168.4.1/24`, with local
@@ -67,20 +73,24 @@ implemented behavior and build instructions.
 - Flash has two 1 MiB packed-frame slots with header/payload CRCs, generation
   selection, readback, and publication tag last. Validated frames are mapped
   read-only; missing/corrupt photos generate white, but I/O faults remain
-  explicit. Landscape rotates clockwise to native 1200 x 1600.
+  explicit. Landscape is native at 800 x 480; portrait rotates clockwise into it.
 - Both modes render the same 120 x 48 status box with full battery icon and
   unknown `?%`, up-to-24-pixel text, and 16-pixel corner margins. No fake charge
   percentage. Saved pixels are unchanged. Font/license details and accepted
   hardware observations are in the [README](README.md).
-- The N16R8 has 16 MiB flash and 8 MiB octal PSRAM at 40 MHz. Large ordinary
+- The XIAO ESP32-S3 Plus has 16 MiB flash and 8 MiB octal PSRAM at 40 MHz.
+  Large ordinary
   allocations prefer PSRAM, with 32 KiB internal reserve for DMA/internal
   requests. The full 4 MiB PSRAM write/read and Rust Vec growth regression
   checks remain, yielding every 64 KiB (~1.6 seconds measured).
-- Panel BUSY is active-low with 120-second per-wait bounds. GPIO45 cuts panel
-  power; SPI device/bus are cleaned after rendering. ADC GPIO4/ADC1_CH3 remains
-  proposed only: confirm wiring/divider/calibration before implementation.
+- The ED2208 panel uses CS44, DC10, RST38, MOSI GPIO9, SCK GPIO7, BUSY4, and
+  active-high panel enable GPIO43; BUSY is active-low with 120-second
+  per-wait bounds. SPI device/bus are cleaned after rendering. The EE04's
+  built-in battery ADC (GPIO1, enabled by GPIO6) is for its single-cell Li-ion
+  connector; NiMH operation uses an external divider on candidate ADC1 GPIO8.
+  Verify the pads, divider, and calibration before implementing battery reads.
   See [wiring requirements](../docs/WIRING.md).
-- The two-mode migration, SW8 simulation, and real USB timer need board
+- The two-mode migration, KEY1 simulation, and real USB timer need board
   acceptance. Existing successful USB upload/manual/retry tests do not qualify
   production sleep/wake or battery operation. Stop accelerated panel cycles
   when bench work ends; closing the serial monitor does not stop firmware.
@@ -89,9 +99,9 @@ implemented behavior and build instructions.
 
 Deep-sleep wake restarts the program; it does not resume an in-memory state.
 Read the reset reason, wake cause, persistent safety metadata, and calibrated
-battery voltage before dispatching work. A GPIO13 low wakes the MCU immediately;
+battery voltage before dispatching work. A GPIO2 low wakes the MCU immediately;
 the button gesture is classified in firmware after wake (see
-[SW7 gestures](#sw7-gestures)).
+[KEY0 gestures](#key0-gestures)).
 
 **Automatic refresh is required every nominal 24 hours**, without a button
 press or an upload. The 24-hour period restarts **only when a refresh
@@ -111,7 +121,7 @@ time of day.
 ```mermaid
 stateDiagram-v2
     [*] --> Boot
-    DeepSleep --> Boot: 24 h / SW7
+    DeepSleep --> Boot: 24 h / KEY0
     Boot --> BatteryGuard
     BatteryGuard --> PrepareSleep: unsafe
     BatteryGuard --> ClassifyButton: button
@@ -135,11 +145,11 @@ stateDiagram-v2
 
 | From | Label | Meaning |
 | --- | --- | --- |
-| DeepSleep | 24 h / SW7 | Automatic RTC wake after nominally 24 hours, or GPIO13 (SW7) button wake. |
+| DeepSleep | 24 h / KEY0 | Automatic RTC wake after nominally 24 hours, or GPIO2 (KEY0) button wake. |
 | Boot | — | Reset and wake causes and recovery metadata read. |
 | BatteryGuard | unsafe | Voltage below threshold, or latch set and not cleared. |
-| BatteryGuard | button / RTC timer | Safe SW7 wake for gesture classification, or safe scheduled wake to refresh the saved frame. |
-| ClassifyButton | 3 s hold / 3 presses / other | See [SW7 gestures](#sw7-gestures); `3 presses` is the manual refresh. |
+| BatteryGuard | button / RTC timer | Safe KEY0 wake for gesture classification, or safe scheduled wake to refresh the saved frame. |
+| ClassifyButton | 3 s hold / 3 presses / other | See [KEY0 gestures](#key0-gestures); `3 presses` is the manual refresh. |
 | LoadFrame | valid / no photo | Persisted frame passes validation, or is missing/corrupt (corruption logged). |
 | DefaultFrame | — | Generated white screen with battery indicator. |
 | UploadWindow | received | Complete bounded upload; stream stage events over HTTP while Wi-Fi remains on. |
@@ -183,7 +193,9 @@ What each refresh shows when a photo may be missing:
 
 A failed decode/save never initiates a panel refresh. A panel fault during an
 otherwise valid upload can leave an incomplete image; report it on the page,
-cut panel power, latch work, and do not automatically retry.
+cut panel power, latch work, and do not automatically retry in production.
+USB mode instead continues after successful cleanup under the development
+policy above; it does not claim that the saved image was displayed.
 
 ### Battery indicator
 
@@ -225,9 +237,9 @@ after the latch is cleared shows it again.
 
 ### Photo orientation and fit
 
-- The person chooses **landscape (1600 x 1200) or portrait (1200 x 1600)** on
+- The person chooses **landscape (800 x 480) or portrait (480 x 800)** on
   the upload page. Store it with the frame metadata. The firmware maps the
-  chosen layout onto the panel's native 1200 x 1600 portrait pixel order.
+  chosen layout onto the panel's native 800 x 480 landscape pixel order.
 - The upload page offers **Stretch** (fill the chosen layout, changing
   proportions) and **Fit** (preserve the whole image with white borders).
   Browser canvas resizing produces a display-sized PNG before transmission;
@@ -242,23 +254,23 @@ after the latch is cleared shows it again.
 | --- | --- | --- |
 | Boot | Initialize logging, capture reset/wake causes, read metadata, start global awake deadline/watchdog supervision. Keep radio and panel off. | Recovery information available, or explicit recovery error. |
 | BatteryGuard | Sample battery before Wi-Fi; apply low/recovery thresholds and latch rules. | Work permitted, or safe sleep requested. |
-| ClassifyButton | Classify the SW7 gesture with debouncing: continuous three-second hold or triple press. Ignore later presses during work. | Upload, manual refresh, or sleep. |
+| ClassifyButton | Classify the KEY0 gesture with debouncing: continuous three-second hold or triple press. Ignore later presses during work. | Upload, manual refresh, or sleep. |
 | UploadWindow | Start WPA2 AP and HTTP server, then idle timer. Allow rejected attempts to retry without extending the window; keep AP on during processing. | Final result sent, bounded expiry, or fatal fault. |
 | Decode | With radio on, validate/decode the browser-normalized PNG, rotate/map to six colours with dithering. | Complete candidate frame or explicit failure. |
 | CommitFrame | Atomically publish the fully validated candidate without destroying the previous committed frame on failure. | New frame committed, or old frame retained. |
 | LoadFrame | Validate stored metadata, length, palette, orientation, and integrity before reading pixels for refresh. | Valid frame, or no photo (missing or corrupt, logged). |
 | DefaultFrame | Generate a white frame with the battery-percentage rectangle. | Frame ready for refresh. |
 | Refresh | Power and initialize panel, stream only a validated frame, wait for bounded completion. | Success or explicit driver/timeout failure. |
-| PrepareSleep | Stop HTTP/AP, release buffers, power panel off, finalize recovery metadata only if safe, handle held button, arm SW7 wake and the RTC timer (24 hours after the last refresh). | Enter deep sleep or report shutdown failure. |
+| PrepareSleep | Stop HTTP/AP, release buffers, power panel off, finalize recovery metadata only if safe, handle held button, arm KEY0 wake and the RTC timer (24 hours after the last refresh). | Enter deep sleep or report shutdown failure. |
 
 All operations must return errors to the cycle coordinator rather than
 silently treating a failed upload, commit, or refresh as success. Log state
 transitions, reset/wake causes, failure reasons, and elapsed time over serial.
 Do not log credentials or uploaded image contents.
 
-### SW7 gestures
+### KEY0 gestures
 
-SW7/GPIO13 is the only user button. The press that wakes the controller counts
+KEY0/GPIO2 is the upload/manual-refresh button. The press that wakes the controller counts
 as the first press, because it may already be released by the time firmware
 runs; the wake cause records it.
 
@@ -281,7 +293,7 @@ stateDiagram-v2
     Pressed2 --> Sleep: timeout
 ```
 
-`press 1` is the GPIO13 wake itself. `press 2` and `press 3` must arrive
+`press 1` is the GPIO2 wake itself. `press 2` and `press 3` must arrive
 within the gesture window; `timeout` means the window expired first.
 
 - The gesture window is **3 s from wake**, as chosen. Verify it on the
@@ -301,7 +313,7 @@ within the gesture window; `timeout` means the window expired first.
   the last manual refresh is ignored and the frame returns to sleep without
   changing the timer deadline. Store the last manual-refresh time in RTC
   memory; after power loss the limit resets, which is acceptable.
-- Start the gesture timer at wake and keep sampling SW7 during boot and the
+- Start the gesture timer at wake and keep sampling KEY0 during boot and the
   battery check, so a quick second press is not missed.
   Current bring-up timing starts at Rust application entry, after bootloader
   execution; edges before GPIO sampling are not captured. The normal path
@@ -311,7 +323,7 @@ within the gesture window; `timeout` means the window expired first.
 
 ### What the user sees during the upload window
 
-1. Hold SW7 for three seconds. The board creates its own Wi-Fi hotspot.
+1. Hold KEY0 for three seconds. The board creates its own Wi-Fi hotspot.
 2. Join that network from a phone or computer using the printed password.
    Stay connected even if the device warns that the network has no internet.
 3. Open `http://192.168.4.1` in a browser. The board serves the upload page;
@@ -467,7 +479,7 @@ stateDiagram-v2
 | fault | Low voltage, brownout reset, or unfinished work marker. |
 | safe | No latch set and voltage above the low threshold. |
 | stay | Timer wake, short press, triple press, or voltage below the recovery threshold. |
-| ack | Qualified three-second SW7 hold with voltage above the recovery threshold. |
+| ack | Qualified three-second KEY0 hold with voltage above the recovery threshold. |
 
 The latch survives resets and battery removal. On every power-on check voltage
 against the recovery threshold, because a cell swap and converter restart look
@@ -476,7 +488,7 @@ writes, or refresh. Establishing or clearing safety metadata is the necessary
 exception to the no-write rule, and must not become a write on every latched
 wake. Do not clear the latch merely because rested cells recover voltage.
 
-Use the qualified SW7 hold for acknowledgement, only above the measured
+Use the qualified KEY0 hold for acknowledgement, only above the measured
 recovery threshold (higher than the low threshold). Clearing the latch must
 complete before normal button dispatch. Neither threshold is a fixed nominal
 NiMH voltage: confirm both under load with real cells, including sag margin
@@ -501,10 +513,10 @@ separately.
 - Always cut panel power after display. Recoverable receive/decode rejections
   keep AP open within the original retry window; stop it on success after
   result grace, expiry, or fatal fault. Retain explicit shutdown errors.
-- Do not arm active-low GPIO wake and sleep while SW7 is held. Debounce
-  release. **Stuck button:** if SW7 is still pressed after **60 s** of waiting,
+- Do not arm active-low GPIO wake and sleep while KEY0 is held. Debounce
+  release. **Stuck button:** if KEY0 is still pressed after **60 s** of waiting,
   sleep with only the RTC timer armed (button wake disabled) and log it. On the
-  next timer wake, re-enable button wake if SW7 is released; if it is still
+  next timer wake, re-enable button wake if KEY0 is released; if it is still
   pressed, repeat the timer-only sleep. The daily refresh keeps working
   while the button is stuck.
 - A watchdog resets the MCU; it does not itself enter deep sleep. Recovery on
@@ -517,7 +529,7 @@ separately.
 
 | Step | Firmware that must be in place | Verification before advancing |
 | --- | --- | --- |
-| 1 | Restore button/sleep integration; add wake-cause dispatch, SW7 gesture classification, and RTC timer. | Short press starts no work cycle; three-second hold dispatches upload once; triple press within the window dispatches refresh once; two presses or a slow third press sleep; held-button handling does not loop; timer wake keeps radio off. |
+| 1 | Restore button/sleep integration; add wake-cause dispatch, KEY0 gesture classification, and RTC timer. | Short press starts no work cycle; three-second hold dispatches upload once; triple press within the window dispatches refresh once; two presses or a slow third press sleep; held-button handling does not loop; timer wake keeps radio off. |
 | 2 | Confirm ADC wiring, calibrate measurement, implement persistent latch and work marker. | Low voltage blocks loads; brownout/unfinished cycle latches; timer cannot clear latch; only qualified acknowledgement above recovery clears it. |
 | 3 | Define frame orientation/format, partitions, atomic commit and validated loading. | Rotation/palette test image is correct; missing/corrupt frame shows the default frame with battery %; reset at each commit stage retains a valid committed frame. |
 | 4 | Implement AP/page and bounded receive path with all deadlines. | Idle timeout; disconnect; stalled and slow-drip uploads; exactly 7,000,000 versus 7,000,001 bytes; false declared sizes and unknown-length bodies; flash staging faults and maximum-size timing on hardware. |

@@ -3,17 +3,17 @@ use crate::frame::{self, Orientation, FRAME_BYTES};
 const PALETTE: [(u8, [i32; 3]); 6] = [
     (0, [0, 0, 0]),
     (1, [255, 255, 255]),
-    (2, [255, 255, 0]),
-    (3, [255, 0, 0]),
-    (5, [0, 0, 255]),
-    (6, [0, 255, 0]),
+    (5, [255, 0, 0]),
+    (6, [255, 255, 0]),
+    (2, [0, 255, 0]),
+    (3, [0, 0, 255]),
 ];
 const BAYER: [[i32; 4]; 4] = [[0, 8, 2, 10], [12, 4, 14, 6], [3, 11, 1, 9], [15, 7, 13, 5]];
 
 pub fn dimensions(orientation: Orientation) -> (usize, usize) {
     match orientation {
-        Orientation::Portrait => (frame::WIDTH, frame::HEIGHT),
-        Orientation::Landscape => (frame::HEIGHT, frame::WIDTH),
+        Orientation::Portrait => (frame::HEIGHT, frame::WIDTH),
+        Orientation::Landscape => (frame::WIDTH, frame::HEIGHT),
     }
 }
 
@@ -117,19 +117,13 @@ mod tests {
     #[test]
     fn dithered_gray_contains_multiple_colors_and_bad_rows_fail() {
         let mut output = vec![0; FRAME_BYTES];
-        let pixels = vec![128; frame::WIDTH * 3];
-        row(&mut output, Orientation::Portrait, 0, &pixels, 3).unwrap();
+        let (width, height) = dimensions(Orientation::Landscape);
+        let pixels = vec![128; width * 3];
+        row(&mut output, Orientation::Landscape, 0, &pixels, 3).unwrap();
         assert!(output[..frame::WIDTH / 2]
             .iter()
             .any(|byte| byte >> 4 != byte & 15));
-        assert!(row(
-            &mut output,
-            Orientation::Portrait,
-            frame::HEIGHT,
-            &pixels,
-            3
-        )
-        .is_err());
-        assert!(row(&mut output, Orientation::Portrait, 0, &pixels, 0).is_err());
+        assert!(row(&mut output, Orientation::Landscape, height, &pixels, 3).is_err());
+        assert!(row(&mut output, Orientation::Landscape, 0, &pixels, 0).is_err());
     }
 }
