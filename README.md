@@ -14,17 +14,15 @@ The proposed electrical connections are modeled in code with
 provides the connection schedule, bill of materials, and bring-up instructions.
 
 The Python environment uses [uv](https://docs.astral.sh/uv/). circuit-synth
-requires KiCad's `Connector_Generic`, `Device`, and `Switch` symbol libraries,
-plus Espressif's `Espressif` library for the ESP32-S3. If KiCad isn't installed,
-download these libraries to the git-ignored `.kicad/symbols` directory:
+requires KiCad's `Connector_Generic` and `power` symbol libraries. Download them to the
+git-ignored `.kicad/symbols` directory:
 
 ```sh
-mkdir -p .kicad/symbols && cd .kicad/symbols
-for l in Connector_Generic Device Switch; do
-  curl -fsSLO "https://gitlab.com/kicad/libraries/kicad-symbols/-/raw/9.0.0/$l.kicad_sym"
+mkdir -p .kicad/symbols
+for lib in Connector_Generic power; do
+  curl -fsSL "https://gitlab.com/kicad/libraries/kicad-symbols/-/raw/9.0.0/$lib.kicad_sym" \
+    -o ".kicad/symbols/$lib.kicad_sym"
 done
-curl -fsSLO "https://raw.githubusercontent.com/espressif/kicad-libraries/main/symbols/Espressif.kicad_sym"
-cd ../..
 ```
 
 Then print the net list:
@@ -33,13 +31,32 @@ Then print the net list:
 KICAD_SYMBOL_DIR=.kicad/symbols uv run wiring
 ```
 
-To generate the KiCad schematic project in `docs/kicad/hof_frame` (open the
-`.kicad_pro` in KiCad; the KiCad symbol and footprint libraries must be
-configured there):
+Save your edits and close the KiCad schematic editor before generating the
+project in `docs/kicad/hof_frame` (requires `kicad-cli`):
 
 ```sh
 KICAD_SYMBOL_DIR=.kicad/symbols uv run wiring --kicad
 ```
 
-`--kicad DIR` writes to `DIR/hof_frame` instead. The output is regenerated from
-`wiring_model` and overwrites manual edits.
+`--kicad DIR` writes to `DIR/hof_frame` instead. Regeneration replaces the
+generated top-level schematic, its PDF (`hof_frame.pdf`, the project wiring page
+only, without Seeed's pages, for viewing without KiCad), circuit-synth JSON, and
+full KiCad netlist. It
+preserves project settings and vendor circuitry, updating only project-specific
+page metadata in the vendor hierarchy. Before replacing files, it checks for
+an open editor and for changes made during generation. Open the `.kicad_pro` in
+KiCad; see the
+[wiring documentation](docs/WIRING.md#kicad-wiring-model) for hierarchy
+navigation, attribution, and the distinction between the model and full netlist.
+
+The bundled Seeed schematic is an **EE04 V1.2 snapshot** and is not automatically
+updated. Before using this wiring, check the
+[Seeed wiki's Resources section](https://wiki.seeedstudio.com/epaper_ee04/#resources)
+for schematic revisions and confirm your board's revision; newer revisions may
+require different wiring.
+
+To check the generated connections and regeneration behavior:
+
+```sh
+KICAD_SYMBOL_DIR=.kicad/symbols uv run python -m unittest discover -s docs/wiring_model/tests -p test_wiring_schematic.py
+```

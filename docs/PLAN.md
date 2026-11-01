@@ -2,15 +2,16 @@
 
 ## Project
 
-Build a Hall of Fame frame around a 13.3-inch GDEP133C02 Spectra 6 color e-ink display and Good Display ESP32-133C02 controller, powered by four AAA NiMH cells and eventually running custom Rust firmware.
+Build a Hall of Fame photo frame around a 7.3-inch Spectra 6 color e-ink display and a Seeed Studio XIAO ePaper Display Board EE04, powered by four AAA NiMH cells and running custom Rust firmware. The only user interaction is a button press to open the photo upload page; there is no speaker or microphone.
 
 ## Hardware
 
-- Display: Good Display GDEP133C02, 13.3-inch, 1600×1200, Spectra 6 color e-ink.
-- Controller: Good Display ESP32-133C02 with ESP32-S3-WROOM-1.
-- Memory: 16 MB flash and 8 MB octal PSRAM, corroborated by third-party research of Good Display's firmware (not yet measured on this board); confirm usable configuration during bring-up.
-- Wake button: the received board's user switches are **SW8 on GPIO12 and SW7 on GPIO13, both pull-up, active-low inputs** (released HIGH, pressed LOW). The firmware uses GPIO13/SW7 as the deep-sleep wake button; the current cycle test refreshes once per wake. The documented SW2/SW3/SW4 buttons are not fitted on this board.
-- Battery-sense ADC: **GPIO14 / ADC2_CH3, ESP32-S3-WROOM-1 module pad 22**, selected after the user reported an accessible pad and no interfering board connection. Sample before starting Wi-Fi because this is ADC2. GPIO4 was not selected after the user found continuity to a microSD socket joint. Firmware and the executable wiring model still need updating; see [WIRING.md](WIRING.md) for measurement and power-sequencing notes.
+- Display: [Seeed Studio 7.3-inch Spectra 6 ePaper](https://www.seeedstudio.com/7-3inch-Six-Color-eInk-ePaper-Display-with-800x480-Pixels-p-6567.html), 800×480, six colors, 50-pin FPC. Outline 170.2 × 111.2 × 0.91 mm, active area 160 × 96 mm.
+- Controller: [Seeed Studio XIAO ePaper Display Board EE04](https://www.seeedstudio.com/XIAO-ePaper-Display-Board-EE04-p-6560.html) with a XIAO ESP32-S3 Plus. Seeed also sells both parts together as a DIY kit.
+- Memory: XIAO ESP32-S3 Plus, 16 MB flash and 8 MB octal PSRAM; confirm the usable configuration during bring-up.
+- Panel connector: the EE04 has 24-pin and 50-pin FPC connectors selected by a jumper cap. The 7.3-inch Spectra 6 uses the **50-pin** connector; set the jumper to 50-pin before powering on.
+- Buttons: the EE04 has a reset button and three user buttons, **KEY0 on GPIO2, KEY1 on GPIO3 and KEY2 on GPIO5**. Seeed's example reads them with pull-ups, so they are active-low (released HIGH, pressed LOW); confirm against the schematic. The firmware uses **KEY0/GPIO2 as the wake button**. KEY1 is used only by the USB development build; KEY2 is unused.
+- Battery-sense ADC: the EE04's built-in battery monitor is for a single-cell Li-ion pack on its JST battery connector (A0/GPIO1 `BAT_ADC`, enabled by D5/GPIO6). It does not measure the external NiMH pack when the board is powered from USB-C. Keep the JST connector empty and connect the external NiMH divider to the free D9/GPIO8 ADC1 pin; verify pad accessibility and calibration at bring-up. See [WIRING.md](WIRING.md) for wiring and power-sequencing notes.
 - Battery: four matched Green Cell AAA (R03) 950 mAh NiMH cells in a series holder. The series pack is 950 mAh at approximately 4.8 V nominal (4.56 Wh nominal).
 - Battery holder: [Allegro 4×AAA holder with integrated switch](https://allegro.pl/produkt/koszyk-na-4-baterie-aaa-4xaaa-z-wlacznikiem-czarny-4c5bce7c-e839-49d4-b6d2-8abc42cdc347?offerId=17382812988).
 - Reverse-polarity protection: none. The battery holder fixes the cell polarity, so a protector module was dropped to keep the first build simple and to save its quiescent current and voltage drop.
@@ -23,20 +24,16 @@ Build a Hall of Fame frame around a 13.3-inch GDEP133C02 Spectra 6 color e-ink d
 flowchart TD
     A["4× AAA NiMH switched holder"]
     C["Pololu S9V11MACMA<br/>5 V converter with<br/>adjustable low-voltage cutoff"]
-    D["ESP32-133C02<br/>5 V / VBUS input"]
+    D["XIAO ePaper EE04<br/>5 V input"]
 
     A --> C --> D
 ```
 
-The four-cell pack is approximately 4.8 V nominal and may be close to 6 V immediately after charging. The S9V11MACMA accepts the pack's voltage range and regulates the controller supply. A fuse or resettable PTC is optional overcurrent protection, not a voltage-compatibility requirement. The converter powers the controller through its USB-C input. The as-built setup omits the planned series Schottky diode, so never connect computer or charger USB at the same time; see the bring-up notes in [WIRING.md](WIRING.md).
+The four-cell pack is approximately 4.8 V nominal and may be close to 6 V immediately after charging. The S9V11MACMA accepts the pack's voltage range and regulates the controller supply. A fuse or resettable PTC is optional overcurrent protection, not a voltage-compatibility requirement.
 
-**As built (2026-10-20):** the user intentionally omitted the 1N5822 and
-connects the converter's 5 V output to the controller through its USB-C input.
-The same USB-C port is used for computer power, so the user will not connect
-computer/charger USB while the converter is connected. The board's USB/VBUS
-isolation behavior is not verified; do not connect another USB power source
-while the converter is on. This differs from the original executable wiring
-model, which still includes the diode.
+The converter's 5 V output feeds the EE04 through its USB-C input. There is no series diode, so **never connect computer or charger USB while the converter is on**. Switch the battery holder off before plugging in USB for flashing.
+
+**Never connect the NiMH pack to the EE04's JST battery connector.** That input is for a single 3.7 V Li-ion cell, and the board's charging IC would try to charge the pack. Leave the connector empty.
 
 The S9V11MACMA provides the hardware low-battery cutoff: its input voltage
 feeds the EN pin through an 11-turn cutoff potentiometer, and the converter
@@ -59,41 +56,43 @@ protection of each individual cell is required, monitor each cell separately;
 do not treat total pack voltage alone as a guarantee against an individual
 cell being over-discharged.
 
-The holder listing and board specifications must be checked against the physical parts when received. Record measured dimensions, switch behavior, wiring, current draw, display timing, and battery runtime separately from these assumptions.
+Check the holder listing and board specifications against the physical parts. Record measured dimensions, switch behavior, wiring, current draw, display timing, and battery runtime separately from these assumptions.
 
-### Received board findings
+### Board interface
 
-Checked against photos of the received board and Good Display's ESP32-133C02-IL specification and panel schematic (the panel schematic does not cover the driver board).
+The Seeed_GFX2 EE04 configuration and Seeed's 7.3-inch ED2208 example document this interface. The GPIO numbers below are ESP32-S3 GPIO numbers; `D8` and `D10` are the XIAO board aliases.
 
-- **Onboard Li-ion charger.** An IP5306 power-bank IC (U14) and a battery connector are fitted. The board is designed for one Li-ion cell. **Never connect the NiMH pack to the board's battery connector**; the IP5306 would try to charge it as a 4.2 V cell.
-- **NiMH path is questionable.** The converter feeds the IP5306's USB-side input through the board's USB-C connector. The user has omitted the planned diode. Do not connect another USB source simultaneously. Before relying on battery power:
-  - Confirm the pad used is VBUS (the IP5306 input), not its 5 V output.
-  - The IP5306 typically needs about 4.5 V or more on its input; measure voltage at the board under load, especially during a refresh. Do not raise the converter output above the controller's specified USB input voltage to compensate for a drop.
-  - Power-bank ICs usually switch their output off after about 30 s of light load; confirm the board survives a minute of deep sleep.
-  - The IP5306 and charge path add to the board sleep current, which is still unmeasured. Measure it before trusting the runtime estimate.
-  - If sleep current or output shut-off is a problem, the fallback is to remove or bypass the IP5306 and power the 5 V rail directly (invasive).
-- **Battery-powered refresh currently fails partway through.** Computer USB power refreshes normally; battery-converter power starts the refresh but stops mid-cycle. The user measured about 5.0005 V at the board input before refresh and about 4.995 V as it started. This small observed change makes a sustained input-voltage drop less likely, but a handheld meter may miss brief transients. A read-only production NVS snapshot is now logged by the USB development build. The next bench session is to reproduce the failure on the same firmware mode, power down the converter, then run the USB build and capture the NVS diagnostics; follow the checklist in [WIRING.md](WIRING.md#next-bench-session-checklist). Firmware changes passed production/USB builds, formatting, and 101 host tests; board confirmation remains outstanding.
-- **Buttons.** SW2/SW3/SW4 are not fitted. The fitted **SW8/GPIO12 and SW7/GPIO13 are pull-up, active-low**. SW7 is the RTC wake/gesture input. SW8 toggles an idle-only simulated fault in USB mode and is unused in production. The previous assumption that these switches only drove the IP5306 was incorrect.
-- **Panel pins** (from the specification and the vendor example): SPI SCK GPIO9, MOSI GPIO41, MISO GPIO40, CS_M GPIO18, CS_S GPIO17, RST GPIO6, BUSY GPIO7 (low while busy), and a panel power **load switch on GPIO45** (high = on). `firmware/src/epd.rs` ports the vendor init sequence.
-- **Debug port.** The native USB-Serial/JTAG enumerates as `303a:1001`, `/dev/ttyACM0`. In deep sleep the port disappears, and with no wake input the board must be unplugged and re-plugged (or reset) to flash again.
+| EE04 signal | ESP32-S3 pin | Use |
+| --- | ---: | --- |
+| Panel CS | GPIO44 | Active-low chip select |
+| Panel DC | GPIO10 | Command/data select |
+| Panel reset | GPIO38 | Active-low reset |
+| Panel MOSI | GPIO9 (`D10`) | SPI data |
+| Panel SCK | GPIO7 (`D8`) | SPI clock |
+| Panel BUSY | GPIO4 | Active-low busy |
+| Panel enable | GPIO43 | Active-high panel power |
+| KEY0 | GPIO2 | Active-low upload/wake button |
+| KEY1 | GPIO3 | Active-low USB-development fault toggle |
+| KEY2 | GPIO5 | Active-low, unused |
+| EE04 Li-ion ADC | GPIO1 (`A0`) | `BAT_ADC`; only for the JST Li-ion battery input |
+| EE04 ADC enable | GPIO6 (`D5`) | Enables the built-in Li-ion divider |
+| NiMH pack ADC | GPIO8 (`D9`) | External divider; free in the EE04 display-pin configuration |
+
+Set the panel jumper to **50-pin**. The official Seeed_GFX2 example uses the ED2208 controller at 800×480 and its board configuration selects these panel pins. Confirm the physical jumper, pad access, signal polarity, and power behavior when the hardware arrives.
+
+The EE04's built-in ADC is useful only if the power source is changed to a supported single-cell Li-ion battery connected to JST. Its guide reads A0/GPIO1 after enabling the divider on GPIO6/D5 and uses a nominal 2:1 ratio. That is not a suitable input for the four-cell NiMH pack. Retain the external divider on GPIO8/D9 for NiMH operation; desoldering a user button is not needed for this pin assignment.
+
+Measure the whole board's sleep current at its 5 V input and the complete pack input, especially during Wi-Fi start-up and refresh, before relying on the runtime estimate. The XIAO's native USB-Serial/JTAG is expected to enumerate as `303a:1001`, `/dev/ttyACM*`. In deep sleep the port disappears; press reset or wake the board to flash again.
 
 ### Battery-runtime target
 
 The intended usage profile is one received photo every 14 days and one
 mandatory full panel refresh every 24 hours.
 
-> **Correction.** An earlier revision of this plan listed 250–500 mAh for one
-> five-minute BLE wake. That figure is wrong: five minutes at 50–100 mA is
-> 4–8 mAh (0.0833 h × 50–100 mA; about 8–17 mAh at the 100–200 mA now assumed for Wi-Fi); the earlier value was in mA·min. The
-> conclusions drawn from it were also wrong. The radio window is **not** the
-> principal lifetime limiter, and the old table's own subtotal (387–637 mAh per
-> 14 days against ~750 mAh usable) implied only about 17–27 days, which
-> contradicted the stated "one to two months". The budget below is corrected.
-
-The corrected first estimate for the PoC power path is about **10 weeks per
+The first estimate for the power path is about **11 weeks per
 charged pack, as an upper bound** that excludes the unmeasured items listed
 below. Keep **about six weeks** as the planning figure until input-side
-measurements replace it; that leaves about 100 mAh per 14 days (about 0.3 mA
+measurements replace it; that leaves about 115 mAh per 14 days (about 0.35 mA
 continuous) for those unmeasured items. This is not a measured result.
 
 The continuous load (regulator quiescent current plus the sensor divider) is
@@ -108,14 +107,14 @@ The preliminary input-side budget for one 14-day interval is:
 
 | Component | Assumption | Estimated pack use |
 | --- | --- | ---: |
-| Scheduled full refreshes | 14 refreshes at 1 W for 30 s, 90% conversion efficiency | ~27 mAh |
-| S9V11MACMA and PoC sensor-module idle draw | 0.2 mA regulator quiescent current plus 0.128 mA divider current for 14 days | ~110 mAh |
+| Scheduled full refreshes | 14 refreshes at 0.5 W (board and panel) for 30 s, 90% conversion efficiency | ~14 mAh |
+| S9V11MACMA and sensor-divider idle draw | 0.2 mA regulator quiescent current plus 0.128 mA divider current for 14 days | ~110 mAh |
 | Wi-Fi/photo-transfer wake | One five-minute wake with the Wi-Fi access point up, averaging an assumed 100–200 mA at the pack | ~8–17 mAh |
-| **Subtotal of known terms** | | **~145–154 mAh** |
-| ESP32-133C02 board sleep current | Whole board on its 5 V input (regulators, USB-UART, level shifters, SD slot), not just the ESP32-S3 | **Unmeasured**; each 0.1 mA adds ~34 mAh |
+| **Subtotal of known terms** | | **~132–141 mAh** |
+| EE04 board sleep current | Whole board on its 5 V input (XIAO regulator, charging IC, any onboard divider), not just the ESP32-S3 | **Unmeasured**; each 0.1 mA adds ~34 mAh |
 | NiMH self-discharge | Depends on cell type | **Unmeasured** |
 
-At ~750 mAh usable, the known terms alone give about 5.2 intervals (about 10
+At ~750 mAh usable, the known terms alone give about 5.5 intervals (about 11
 weeks). The unmeasured board sleep current can dominate everything else, so
 measure it first.
 
@@ -127,7 +126,7 @@ Define a conservative low-battery cutoff for the pack. Measure the minimum loade
 
 ### Battery-voltage measurement and cutoff circuit
 
-Measure the pack on the switched-holder side of the power path, before the converter. Use a high-impedance divider to the selected GPIO14 / ADC2_CH3 input (module pad 22), sampling before Wi-Fi starts:
+Measure the pack on the switched-holder side of the power path, before the converter. Use a high-impedance divider to the selected battery-sense ADC input. If that pin is on ADC2, sample before Wi-Fi starts:
 
 ```text
 Battery+ after holder switch ── 100 kΩ ──┬── ADC input
@@ -179,32 +178,34 @@ Because the converter's cutoff is not latching, a pack that recovers after shutd
 - Set the latch when the firmware measures a pack voltage below the low-battery threshold, sees a brownout reset, or finds that the previous cycle did not finish cleanly. Detect the last case with a "work in progress" flag set before a transfer, flash write or refresh and cleared just before entering deep sleep.
 - Check the pack voltage on every power-on reset, since cell swaps and converter restarts both look like a power-on. If the voltage is below a recovery threshold, set the latch and sleep.
 - While latched, do no Wi-Fi, image flash writes or refresh, and return to deep sleep after safe button-release handling. Only necessary latch metadata changes may be written; do not rewrite unchanged metadata on every wake. The 24-hour timer wake still happens, but only re-checks and sleeps again.
-- Clear it only when **the user acknowledges it** with a qualified three-second SW7/GPIO13 hold, and only if the pack voltage is above a recovery threshold higher than the low-battery threshold (hysteresis). Freshly charged or replaced cells (about 5.2–5.8 V) pass easily; recovered tired cells (about 4.8–4.9 V) do not.
+- Clear it only when **the user acknowledges it** with a qualified three-second KEY0/GPIO2 hold, and only if the pack voltage is above a recovery threshold higher than the low-battery threshold (hysteresis). Freshly charged or replaced cells (about 5.2–5.8 V) pass easily; recovered tired cells (about 4.8–4.9 V) do not.
 - Pick both thresholds from the loaded-voltage characterization and real discharged cells, and verify on the bench that the converter does not cycle.
 
 While latched, a button press with a recovered-but-still-low pack must not clear it, so the frame needs some way to tell the user why it did nothing. **Decision:** when the latch first sets, refresh once with a "Replace batteries" screen, only if the measured voltage still has margin for that refresh above the converter cutoff; otherwise keep the current picture. See [low-battery screen](../firmware/STATE_MACHINE.md#low-battery-screen).
 
 ## Physical frame
 
-The physical design and fit-check prototype are considered complete for planning purposes. The frame must accommodate:
+The frame is designed around the 7.3-inch panel (170.2 × 111.2 × 0.91 mm outline, 160 × 96 mm active area) and must accommodate:
 
 - Display panel and front bezel.
-- ESP32-133C02 board and display cable.
+- EE04 board, the 50-pin FPC cable and its bend radius, and access to the reset button.
+- KEY0 reachable from outside the frame as the upload button.
 - Battery holder with cell-removal access and switch access.
-- S9V11MACMA converter, wiring, and cable bend radius.
+- S9V11MACMA converter and wiring.
+- USB-C access for flashing.
 - Rear cover, service access, and wall/stand mounting.
 
 ## Firmware behavior
 
-Target the ESP32-S3-WROOM-1 using an ESP-IDF-backed Rust project (`esp-idf-svc`). This is preferred over a pure `esp-hal` implementation because Wi-Fi, the HTTP server and deep-sleep support are the highest-risk requirements.
+Target the XIAO ESP32-S3 Plus using an ESP-IDF-backed Rust project (`esp-idf-svc`). This is preferred over a pure `esp-hal` implementation because Wi-Fi, the HTTP server and deep-sleep support are the highest-risk requirements.
 
 Image upload uses a **Wi-Fi access point and an embedded web page**, not Bluetooth (see "Image transfer" and "Future: Bluetooth").
 
 Firmware has two build modes: default production (real sleep, 24-hour scheduled
 refresh) and `--features usb` (logged/simulated sleep, real display every
 60 seconds after completion). Upload, conversion, storage, web progress, and
-panel cleanup are shared. Both retain the one-hour manual limit. USB's SW8
-toggles an idle-only simulated fault, initially off; actual runtime faults
+panel cleanup are shared. Both retain the one-hour manual limit. In the USB
+build, KEY1/GPIO3 toggles an idle-only simulated fault, initially off; actual runtime faults
 remain separate in `hof_usb` and block the running session; USB reboot logs
 and resets that guard to Clean as an explicit development policy, not qualified
 battery recovery. Production `hof_safety` is not
@@ -230,7 +231,7 @@ flowchart TD
     L{"Low-battery latch set<br/>or voltage too low?"}
     L2{"Latch set or<br/>voltage too low?"}
 
-    A -->|"SW7 / GPIO13"| Q{"SW7 gesture?"}
+    A -->|"KEY0 / GPIO2"| Q{"KEY0 gesture?"}
     Q -->|"Other"| E
     Q -->|"Five-second hold"| L
     Q -->|"Triple press"| L2
@@ -249,18 +250,18 @@ flowchart TD
 
 Required behavior:
 
-1. Wake from deep sleep using SW7/GPIO13 or the 24-hour RTC timer and identify the wake cause.
-2. On a button wake, qualify a three-second SW7/GPIO13 hold before starting a Wi-Fi access point (SSID `HOF-Frame`, WPA2, password fixed at build time, kept out of git, and printed on the frame) and an HTTP server that serves a single upload page at `http://192.168.4.1`. Shorter presses return to sleep without starting Wi-Fi.
+1. Wake from deep sleep using KEY0/GPIO2 or the 24-hour RTC timer and identify the wake cause.
+2. On a button wake, qualify a three-second KEY0/GPIO2 hold before starting a Wi-Fi access point (SSID `HOF-Frame`, WPA2, password fixed at build time, kept out of git, and printed on the frame) and an HTTP server that serves a single upload page at `http://192.168.4.1`. Shorter presses return to sleep without starting Wi-Fi.
 3. Start a five-minute idle timer when the access point comes up, then shorten it after measuring real transfers.
 4. Apply transfer deadlines to an accepted upload; retain the original idle/global deadline for any retries without extending it.
 5. Receive and validate a complete image. Keep Wi-Fi active through decode, verified save, display refresh, and safety cleanup. Stream real stages to a four-part web progress bar (Send image, Process image, Update display, Complete); only the terminal success event confirms completion, not the initial HTTP status. Wait six seconds after success before shutting down the AP.
-6. Decode, stretch to the orientation chosen on the upload page (landscape 1600×1200 or portrait 1200×1600), apply the required Spectra 6 color conversion and dithering, persist a display-ready frame with its orientation and battery-indicator corner, and render only a complete, decodable, integrity-checked image. Every refresh overlays a small battery-percentage box in the chosen corner (top right by default). On a cold boot with a valid photo saved, refresh it.
+6. Decode, stretch to the orientation chosen on the upload page (landscape 800×480 or portrait 480×800), apply the required Spectra 6 color conversion and dithering, persist a display-ready frame with its orientation and battery-indicator corner, and render only a complete, decodable, integrity-checked image. Every refresh overlays a small battery-percentage box in the chosen corner (top right by default). On a cold boot with a valid photo saved, refresh it.
 7. On an RTC wake, refresh the persisted frame with Wi-Fi disabled, then return to deep sleep. If no valid photo is saved (first boot, never uploaded, or corrupt), refresh a generated default frame instead: white screen with a small battery-percentage rectangle.
-8. On a button wake, three SW7/GPIO13 presses within 3 s from wake (counting the waking press) trigger a manual refresh: the same battery-guarded, Wi-Fi-off path as the RTC refresh. It does not clear the low-battery latch. At most one manual refresh per hour; a triple press within the hour is ignored. See [SW7 gestures](../firmware/STATE_MACHINE.md#sw7-gestures).
+8. On a button wake, three KEY0/GPIO2 presses within 3 s from wake (counting the waking press) trigger a manual refresh: the same battery-guarded, Wi-Fi-off path as the RTC refresh. It does not clear the low-battery latch. At most one manual refresh per hour; a triple press within the hour is ignored. See [button gestures](../firmware/STATE_MACHINE.md#key0-gestures).
 9. Below the measured low-battery threshold, or while the low-battery latch is set, do not start Wi-Fi or a display refresh; the converter's built-in cutoff disables its output. When the latch first sets, show a "Replace batteries" screen once, only if the voltage still has margin for that refresh.
 10. Transfer/decode rejection leaves the persisted frame and display unchanged and permits retry within the original bounded window. Save/display/safety faults report failure on the web page where possible, then stop and latch without automatic retry. Retain any valid committed photo; never trigger an extra fallback refresh or persistent error mark.
 11. The 24-hour period restarts only when a refresh completes successfully (daily, manual, cold boot, or after an upload). Wakes without a refresh (short press, upload timeout, rate-limited triple press) re-arm the timer for the remaining time, so they do not postpone the daily refresh. A low-battery skip arms a full 24 hours to re-check.
-12. Do not enter deep sleep while SW7/GPIO13 (active-low, pull-up) is still held, otherwise the pin level immediately wakes the device again. Wait for release (with debounce) first. If it is still held after 60 s (stuck or pressed by the enclosure), sleep with only the RTC timer armed and re-enable button wake on a later timer wake once it is released. Presses during a refresh or transfer are ignored.
+12. Do not enter deep sleep while KEY0/GPIO2 (active-low, pull-up) is still held, otherwise the pin level immediately wakes the device again. Wait for release (with debounce) first. If it is still held after 60 s (stuck or pressed by the enclosure), sleep with only the RTC timer armed and re-enable button wake on a later timer wake once it is released. Presses during a refresh or transfer are ignored.
 13. The ESP32-S3 RTC timer runs from the internal RC slow clock, which is not crystal-accurate and drifts with temperature and supply; several percent error, i.e. an hour or more per 24 h, is plausible. "Every 24 hours" is therefore nominal. Measure the actual period at bring-up; it does not need correction unless the refresh time of day matters.
 
 ## Image transfer (Wi-Fi access point and web page)
@@ -316,9 +317,9 @@ The project owner still wants to move to Bluetooth eventually, so keep the desig
 Memory is the main firmware risk for on-device decoding. A 7 MB encoded buffer
 plus candidate and decoder workspace leaves insufficient PSRAM headroom.
 Encoded bytes are therefore staged in flash and read through a 4 KiB buffer.
-A full 1600 x 1200 RGB decode (5.76 MB) is also avoided. The decoder must therefore:
+A full 800 x 480 RGB decode (1.15 MB) is also avoided. The decoder must therefore:
 
-- stream row-by-row or strip-by-strip, converting directly into the 4-bits-per-pixel display frame (1600×1200 × 4 bit = 960 KB) rather than holding a full-color image;
+- stream row-by-row or strip-by-strip, converting directly into the 4-bits-per-pixel display frame (800×480 × 4 bit = 192 KB) rather than holding a full-color image;
 - use JPEG DCT scaling (1/2, 1/4, 1/8) or equivalent downscaling during decode for large images;
 - reject progressive JPEGs and large interlaced PNGs if they cannot be decoded within the configured limits.
 
@@ -346,10 +347,10 @@ Decided: SSID `HOF-Frame` with a build-time WPA2 password kept out of git; trans
 
 ## Firmware milestones
 
-1. Confirm the ESP32-S3-WROOM-1 configuration, board GPIO map (including electrical qualification of the selected GPIO14 / ADC2_CH3 battery-sense connection), display bus, SW7/GPIO13 (active-low, pull-up) wake behavior, PSRAM, flash layout, and Wi-Fi AP support.
-2. Create a minimal ESP-IDF-backed Rust project that builds, can be flashed during development, logs the wake cause, enters deep sleep, and redraws after SW7/GPIO13 wakes it. Measure the whole board's deep-sleep current at its 5 V input as early as possible, since it dominates the battery budget.
+1. Confirm the XIAO ESP32-S3 Plus configuration, EE04 GPIO map (including the choice and electrical qualification of the battery-sense ADC pin), display bus and 50-pin jumper setting, KEY0/GPIO2 (active-low, pull-up) wake behavior, PSRAM, flash layout, and Wi-Fi AP support.
+2. Create a minimal ESP-IDF-backed Rust project that builds, can be flashed during development, logs the wake cause, enters deep sleep, and redraws after KEY0/GPIO2 wakes it. Measure the whole board's deep-sleep current at its 5 V input as early as possible, since it dominates the battery budget.
 3. Bring up the display with a simple test pattern and validate the refresh sequence.
-4. Implement SW7/GPIO13 gesture classification (three-second hold for upload, triple press for manual refresh) and 24-hour RTC wake handling, including the low-battery behavior for scheduled and manual refreshes.
+4. Implement KEY0/GPIO2 gesture classification (three-second hold for upload, triple press for manual refresh) and 24-hour RTC wake handling, including the low-battery behavior for scheduled and manual refreshes.
 5. Implement the Wi-Fi access point, HTTP server and upload page with the receive window; measure real transfer duration and shorten the five-minute timeout to limit awake time and exposure.
 6. Implement the streamed PNG/JPEG upload with the 7,000,000-byte guardrail,
    flash staging, and transfer deadlines.
@@ -370,7 +371,7 @@ Keep the README and supporting files aligned with the measured project:
 - Firmware state machine, upload page and HTTP interface (and the planned BLE move).
 - PNG/JPEG preparation and 7 MB (7,000,000-byte) limit.
 - Normal operation, interrupted-transfer recovery and low-battery latch behavior.
-- Whole-board sleep current and the corrected runtime budget.
+- Whole-board sleep current and the runtime budget.
 - Converter low-battery cutoff behavior and measured loaded-voltage threshold.
 - Measured current, refresh timing, wireless reliability, and battery runtime.
 
@@ -378,7 +379,11 @@ Clearly label provisional assumptions versus confirmed specifications and measur
 
 ## Reference links
 
-- [ESP32-133C02 product page](https://www.good-display.com/product/574.html)
-- [ESP32-133C02 specification](https://www.good-display.com/companyfile/2035.html)
+- [Seeed Studio XIAO ePaper Display Board EE04](https://www.seeedstudio.com/XIAO-ePaper-Display-Board-EE04-p-6560.html)
+- [EE04 getting-started wiki](https://wiki.seeedstudio.com/epaper_ee04/)
+- [EE04 PlatformIO guide (battery ADC and buttons)](https://wiki.seeedstudio.com/ee04_with_platformio/)
+- [EE04 official schematic PDF, revision 1.2](https://files.seeedstudio.com/wiki/Epaper/EE04/XIAO_ePaper_Display_Board_EE04_SCH_V1.2.pdf)
+- [Seeed_GFX2 EE04 / 7.3-inch Spectra 6 example](https://github.com/Seeed-Studio/Seeed_GFX2/tree/main/examples/ePaper%20Displays/Expansion%20Board%20Series/ESP32%20Series/XIAO%20ePaper%20Display%20Board%20-%20EE04/7.3-inch%20ePaper%20-%20Spectra%206%20800x480)
+- [Seeed Studio 7.3-inch Spectra 6 ePaper](https://www.seeedstudio.com/7-3inch-Six-Color-eInk-ePaper-Display-with-800x480-Pixels-p-6567.html)
 - [Pololu S9V11MACMA #2868](https://www.pololu.com/product/2868)
 - [4×AAA switched holder](https://allegro.pl/produkt/koszyk-na-4-baterie-aaa-4xaaa-z-wlacznikiem-czarny-4c5bce7c-e839-49d4-b6d2-8abc42cdc347?offerId=17382812988)
