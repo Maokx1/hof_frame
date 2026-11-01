@@ -1,0 +1,23 @@
+Seeed Studio XIAO ePaper Display Board EE04 V1.2
+
+Source: https://files.seeedstudio.com/wiki/Epaper/EE04/XIAO_ePaper_Display_Board_EE04_V1.2_SCH&PCB.zip
+Official schematic: https://files.seeedstudio.com/wiki/Epaper/EE04/XIAO_ePaper_Display_Board_EE04_SCH_V1.2.pdf
+Current vendor resources: https://wiki.seeedstudio.com/epaper_ee04/#resources
+License: Creative Commons Attribution-ShareAlike 4.0 International
+https://creativecommons.org/licenses/by-sa/4.0/
+
+Revision warning: this project uses a local snapshot of the EE04 V1.2
+schematic; it is not automatically updated from Seeed Studio. Seeed may
+publish revised schematics or ship a different board revision in the future.
+Before using this wiring, check the Seeed Studio wiki Resources section to see whether
+the published schematic is still V1.2, and confirm your physical board's
+revision. Compare any newer revision before assuming this wiring applies.
+
+The original and adapted Seeed schematic sheets in this directory are
+distributed under CC BY-SA 4.0, separately from the project's MIT-licensed
+code. The original schematic PDF identifies Seeed Studio and the license.
+
+Changes: hierarchical USB_5V, GND, and GPIO8/D9 ports, project-specific
+hierarchy page instances, and attribution text were added. The no-connect
+marker on the XIAO D9 pin was removed to connect the external battery-voltage
+divider.

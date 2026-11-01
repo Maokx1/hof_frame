@@ -19,3 +19,17 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+Third-party schematic notice
+----------------------------
+
+The KiCad schematic files in
+docs/kicad/hof_frame/seeed-ee04-v1.2/ are copied from and adapted from the
+Seeed Studio XIAO ePaper Display Board EE04 V1.2 schematic. They are not
+original work by Maokx1 and are not licensed under this MIT License. Those
+files are identified in their accompanying NOTICE.txt and are made available
+under the Creative Commons Attribution-ShareAlike 4.0 International License:
+https://creativecommons.org/licenses/by-sa/4.0/
+
+The MIT License above applies to the project's original code and other original
+materials only. Third-party materials retain their own copyright and license.
