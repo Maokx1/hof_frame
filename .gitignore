@@ -30,3 +30,6 @@ __pycache__/
 
 # Local KiCad symbol libraries for circuit-synth
 .kicad/
+
+# KiCad local history backups
+docs/kicad/hof_frame/.history/
