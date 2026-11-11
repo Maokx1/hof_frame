@@ -318,7 +318,7 @@ is a fixed symbol, not a measured charge level. Orientation/corner metadata
 rotates placement and text. The panel is powered off and SPI bus/device freed
 after each refresh; failures attempt emergency power cutoff.
 
-The 5,760-byte overlay uses `fontdue` and the subset
+The 5,760-byte overlay uses `swash` and the subset
 [DejaVu Sans font](assets/status-font.ttf), distributed under the
 [Bitstream Vera license](assets/DejaVu-LICENSE.txt). To regenerate:
 

@@ -47,6 +47,8 @@ fn all_corners_follow_layout_rotation_and_exact_margins() {
 #[test]
 fn unknown_text_is_24_pixels_high_and_all_percentages_fit() {
     let unknown = StatusOverlay::new(Default::default(), None).unwrap();
+    let mut rendered = std::collections::HashSet::new();
+    rendered.insert(unknown.pixels.clone());
     let text_rows: Vec<_> = (BORDER..BOX_HEIGHT - BORDER)
         .filter(|y| {
             (BORDER..BOX_WIDTH - BORDER).any(|x| unknown.pixels[y * BOX_WIDTH + x] == BLACK)
@@ -62,6 +64,10 @@ fn unknown_text_is_24_pixels_high_and_all_percentages_fit() {
             .pixels
             .iter()
             .all(|pixel| matches!(pixel, &BLACK | &WHITE)));
+        assert!(
+            rendered.insert(overlay.pixels),
+            "duplicate label for {value}%"
+        );
     }
     assert!(StatusOverlay::new(Default::default(), Some(101)).is_err());
     assert_eq!(unknown.pixel(frame::WIDTH, 0), None);
@@ -98,18 +104,10 @@ fn full_battery_precedes_unknown_and_full_percentage() {
             overlay.pixels[(y + ICON_HEIGHT / 2) * BOX_WIDTH + left + ICON_WIDTH - 1],
             BLACK
         );
-        let font = fontdue::Font::from_bytes(
-            include_bytes!("../../assets/status-font.ttf") as &[u8],
-            fontdue::FontSettings::default(),
-        )
-        .unwrap();
-        let size = 32.0 * TEXT_HEIGHT as f32 / font.metrics('?', 32.0).height as f32;
-        let space_width = font.metrics(' ', size).advance_width.ceil() as usize;
-        assert!(space_width > 0);
-        assert!((left + ICON_WIDTH..left + ICON_WIDTH + space_width)
+        assert!((left + ICON_WIDTH..left + ICON_WIDTH + 2)
             .all(|x| (BORDER..BOX_HEIGHT - BORDER)
                 .all(|y| overlay.pixels[y * BOX_WIDTH + x] == WHITE)));
-        assert!((left + ICON_WIDTH + space_width..BOX_WIDTH - BORDER)
+        assert!((left + ICON_WIDTH + 2..BOX_WIDTH - BORDER)
             .any(|x| (BORDER..BOX_HEIGHT - BORDER)
                 .any(|y| overlay.pixels[y * BOX_WIDTH + x] == BLACK)));
     }

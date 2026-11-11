@@ -1,4 +1,8 @@
 use crate::frame::{self, Corner, Metadata, Orientation};
+use swash::{
+    scale::{Render, ScaleContext, Source},
+    FontRef,
+};
 
 pub const BOX_WIDTH: usize = 120;
 pub const BOX_HEIGHT: usize = 48;
@@ -25,43 +29,73 @@ impl StatusOverlay {
             Some(_) => return Err("battery percentage exceeds 100".into()),
             None => " ?%".into(),
         };
-        let font = fontdue::Font::from_bytes(
-            include_bytes!("../assets/status-font.ttf") as &[u8],
-            fontdue::FontSettings::default(),
-        )
-        .map_err(str::to_owned)?;
-        let mut size = 32.0 * TEXT_HEIGHT as f32 / font.metrics('?', 32.0).height as f32;
-        let text_budget = BOX_WIDTH - 2 * (BORDER + PADDING) - ICON_WIDTH;
-        while text
+        let font = FontRef::from_index(include_bytes!("../assets/status-font.ttf"), 0)
+            .ok_or("invalid status font")?;
+        let charmap = font.charmap();
+        let glyph_ids: Vec<_> = text
             .chars()
-            .map(|ch| font.metrics(ch, size).advance_width.ceil() as usize)
-            .sum::<usize>()
-            > text_budget
-            || text
-                .chars()
-                .map(|ch| font.metrics(ch, size).height)
-                .max()
-                .unwrap_or(0)
-                > TEXT_HEIGHT
-        {
+            .map(|ch| {
+                let id = charmap.map(ch);
+                if id == 0 {
+                    Err(format!("status font is missing {ch:?}"))
+                } else {
+                    Ok((ch, id))
+                }
+            })
+            .collect::<Result<_, _>>()?;
+        let mut context = ScaleContext::new();
+        let renderer = Render::new(&[Source::Outline]);
+        let question = renderer
+            .render(
+                &mut context.builder(font).size(32.0).build(),
+                charmap.map('?'),
+            )
+            .ok_or("cannot render status font")?;
+        if question.placement.height == 0 {
+            return Err("invalid status font bounds".into());
+        }
+        let mut size = 32.0 * TEXT_HEIGHT as f32 / question.placement.height as f32;
+        let text_budget = BOX_WIDTH - 2 * (BORDER + PADDING) - ICON_WIDTH;
+        let (glyphs, width) = loop {
+            let metrics = font.glyph_metrics(&[]).scale(size);
+            let mut scaler = context.builder(font).size(size).build();
+            let mut glyphs = Vec::with_capacity(glyph_ids.len());
+            let mut width = 0;
+            let mut max_height = 0;
+            for &(ch, id) in &glyph_ids {
+                let advance = metrics.advance_width(id).ceil() as usize;
+                let image = if ch == ' ' {
+                    None
+                } else {
+                    let image = renderer
+                        .render(&mut scaler, id)
+                        .ok_or_else(|| format!("cannot render status glyph {ch:?}"))?;
+                    max_height = max_height.max(image.placement.height as usize);
+                    Some(image)
+                };
+                glyphs.push((advance, image));
+                width += advance;
+            }
+            if width <= text_budget && max_height <= TEXT_HEIGHT {
+                break (glyphs, width);
+            }
             size -= 0.5;
             if size <= 0.0 {
                 return Err("status text cannot fit beside the battery icon".into());
             }
-        }
-        let glyphs: Vec<_> = text.chars().map(|ch| font.rasterize(ch, size)).collect();
-        let width: usize = glyphs
-            .iter()
-            .map(|(m, _)| m.advance_width.ceil() as usize)
-            .sum();
+        };
         let ascent = glyphs
             .iter()
-            .map(|(m, _)| m.height as i32 + m.ymin)
+            .map(|(_, image)| image.as_ref().map_or(0, |image| image.placement.top))
             .max()
             .ok_or("empty status text")?;
         let descent = glyphs
             .iter()
-            .map(|(m, _)| m.ymin)
+            .map(|(_, image)| {
+                image.as_ref().map_or(0, |image| {
+                    image.placement.top - image.placement.height as i32
+                })
+            })
             .min()
             .ok_or("empty status text")?;
         let height = usize::try_from(ascent - descent).map_err(|_| "invalid font bounds")?;
@@ -99,29 +133,32 @@ impl StatusOverlay {
         // The panel has no gray: ordered coverage preserves outline-rasterized edges.
         const COVERAGE: [[u16; 4]; 4] =
             [[0, 8, 2, 10], [12, 4, 14, 6], [3, 11, 1, 9], [15, 7, 13, 5]];
-        for (metrics, bitmap) in glyphs {
-            let left = pen + metrics.xmin;
-            let top = baseline - metrics.height as i32 - metrics.ymin;
-            for y in 0..metrics.height {
-                for x in 0..metrics.width {
-                    let dx = left + x as i32;
-                    let dy = top + y as i32;
-                    if dx < BORDER as i32
-                        || dx >= (BOX_WIDTH - BORDER) as i32
-                        || dy < BORDER as i32
-                        || dy >= (BOX_HEIGHT - BORDER) as i32
-                    {
-                        return Err("status glyph clips the battery box".into());
-                    }
-                    let dx = dx as usize;
-                    let dy = dy as usize;
-                    if u16::from(bitmap[y * metrics.width + x]) > COVERAGE[dy % 4][dx % 4] * 16 + 7
-                    {
-                        pixels[dy * BOX_WIDTH + dx] = BLACK;
+        for (advance, image) in glyphs {
+            if let Some(image) = image {
+                let left = pen + image.placement.left;
+                let top = baseline - image.placement.top;
+                let width = image.placement.width as usize;
+                for y in 0..image.placement.height as usize {
+                    for x in 0..width {
+                        let dx = left + x as i32;
+                        let dy = top + y as i32;
+                        if dx < BORDER as i32
+                            || dx >= (BOX_WIDTH - BORDER) as i32
+                            || dy < BORDER as i32
+                            || dy >= (BOX_HEIGHT - BORDER) as i32
+                        {
+                            return Err("status glyph clips the battery box".into());
+                        }
+                        let dx = dx as usize;
+                        let dy = dy as usize;
+                        if u16::from(image.data[y * width + x]) > COVERAGE[dy % 4][dx % 4] * 16 + 7
+                        {
+                            pixels[dy * BOX_WIDTH + dx] = BLACK;
+                        }
                     }
                 }
             }
-            pen += metrics.advance_width.ceil() as i32;
+            pen += advance as i32;
         }
         let (width, height) = crate::conversion::dimensions(metadata.orientation);
         let left = match metadata.battery_corner {

@@ -4,7 +4,6 @@ version = "0.1.0"
 authors = ["Maokx1 <4mprog@gmail.com>"]
 edition = "2021"
 resolver = "2"
-rust-version = "1.82"
 default-run = "firmware"
 
 [[bin]]
@@ -13,9 +12,9 @@ name = "firmware"
 test = false
 
 [dependencies]
-fontdue = { version = "0.9.5", default-features = false, features = ["std"] }
 log = "0.4.35"
 png = "0.18.1"
+swash = "0.2.10"
 
 [build-dependencies]
 embuild = { version = "0.33.7", features = ["espidf"] }
