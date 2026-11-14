@@ -4,7 +4,7 @@ version = "0.1.0"
 requires-python = ">=3.14"
 dependencies = [
   "circuit-synth>=0.12.1",
-  "pydantic>=2.14.2",
+  "pydantic>=2.14.3",
   "reportlab>=5.1.0",
 ]
 
@@ -12,7 +12,7 @@ dependencies = [
 wiring = "wiring_model.__main__:main"
 
 [dependency-groups]
-dev = ["ruff>=0.17.3"]
+dev = ["ruff>=0.17.5"]
 
 [build-system]
 requires = ["setuptools>=77"]
