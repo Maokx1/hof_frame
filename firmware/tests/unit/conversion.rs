@@ -1,6 +1,21 @@
 use super::*;
 
 #[test]
+fn spectra6_palette_uses_ed2208_native_codes() {
+    assert_eq!(
+        PALETTE,
+        [
+            (0, [0, 0, 0]),
+            (1, [255, 255, 255]),
+            (2, [255, 255, 0]),
+            (3, [255, 0, 0]),
+            (5, [0, 0, 255]),
+            (6, [0, 255, 0]),
+        ]
+    );
+}
+
+#[test]
 fn white_and_transparency_stay_white() {
     for orientation in [Orientation::Portrait, Orientation::Landscape] {
         let (width, height) = dimensions(orientation);

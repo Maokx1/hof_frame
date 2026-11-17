@@ -136,7 +136,12 @@ fn refresh_panel_with(
         log::error!("panel display operation failed: {error:?}");
     }
     let phase = set_work_phase(safety, WorkPhase::PanelCleanup);
-    let power_off = epd.power_off();
+    let power_off = if refresh.is_ok() {
+        epd.power_off()
+    } else {
+        log::warn!("display refresh failed; cutting panel power without another BUSY wait");
+        epd::Epd::disable_panel_power()
+    };
     let cleanup = epd.close();
     // Only a display operation failure is recoverable, never failed cleanup.
     phase?;

@@ -16,8 +16,8 @@ fn delayed_assertion_must_be_followed_by_idle() {
     let mut busy = RefreshBusy::default();
     assert_eq!(busy.sample(Duration::ZERO, true), Ok(false));
     assert_eq!(busy.sample(Duration::from_millis(100), false), Ok(false));
-    assert_eq!(busy.sample(Duration::from_secs(20), false), Ok(false));
-    assert_eq!(busy.sample(Duration::from_secs(30), true), Ok(true));
+    assert_eq!(busy.sample(Duration::from_secs(30), false), Ok(false));
+    assert_eq!(busy.sample(Duration::from_secs(31), true), Ok(true));
 }
 
 #[test]

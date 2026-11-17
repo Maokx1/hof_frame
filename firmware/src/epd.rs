@@ -20,10 +20,10 @@ const MAX_TRANSFER_BYTES: usize = 32_768;
 
 pub const BLACK: u8 = 0;
 pub const WHITE: u8 = 1;
-pub const GREEN: u8 = 2;
-pub const BLUE: u8 = 3;
-pub const RED: u8 = 5;
-pub const YELLOW: u8 = 6;
+pub const YELLOW: u8 = 2;
+pub const RED: u8 = 3;
+pub const BLUE: u8 = 5;
+pub const GREEN: u8 = 6;
 
 const PIN_CS: i32 = 44;
 const PIN_DC: i32 = 10;
@@ -37,7 +37,7 @@ const CMD_WRITE_RAM: u8 = 0x10;
 const CMD_REFRESH: u8 = 0x12;
 const CMD_POWER_ON: u8 = 0x04;
 const CMD_POWER_OFF: u8 = 0x02;
-const BUSY_TIMEOUT: Duration = Duration::from_secs(120);
+const BUSY_TIMEOUT: Duration = Duration::from_secs(20);
 
 const INIT_SEQUENCE: &[(u8, &[u8])] = &[
     (0xAA, &[0x49, 0x55, 0x20, 0x08, 0x09, 0x18]),
@@ -115,6 +115,7 @@ impl Epd {
         bus.__bindgen_anon_3.quadwp_io_num = -1;
         bus.__bindgen_anon_4.quadhd_io_num = -1;
         bus.max_transfer_sz = MAX_TRANSFER_BYTES as i32;
+        bus.isr_cpu_id = sys::esp_intr_cpu_affinity_t_ESP_INTR_CPU_AFFINITY_1;
 
         let mut dev: sys::spi_device_interface_config_t = unsafe { std::mem::zeroed() };
         dev.clock_speed_hz = 10_000_000;
