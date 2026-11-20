@@ -7,6 +7,13 @@ Hall of Fame frame with E-ink display
 3. [Firmware (ESP-IDF-backed Rust) can be found here](firmware/README.md).
 4. [Parametric Onshape enclosure](docs/enclosure/hof_frame.fs).
 
+The enclosure centers its outer frame on the display opening for equal visible
+borders. **Minimum border outside panel** controls the minimum clearance from
+the panel to the outside of the frame; the visible borders are wider. The
+**Inner front round-over radius** rounds the opening while leaving the outer
+corners square (set it to zero for a flat front). Check the fit and print a
+test section before printing the full enclosure.
+
 ## Wiring source of truth
 
 The proposed electrical connections are modeled in code with

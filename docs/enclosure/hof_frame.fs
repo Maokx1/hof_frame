@@ -67,11 +67,11 @@ export const hofFrame = defineFeature(function(context is Context, id is Id, def
         isLength(definition.electronicsDepth,
             { (millimeter) : [20, 22, 40] } as LengthBoundSpec);
 
-        annotation { "Name" : "Border outside panel" }
+        annotation { "Name" : "Minimum border outside panel" }
         isLength(definition.border,
             { (millimeter) : [12, 12, 25] } as LengthBoundSpec);
 
-        annotation { "Name" : "Front round-over radius (0 = flat)" }
+        annotation { "Name" : "Inner front round-over radius (0 = flat)" }
         isLength(definition.frontRadius,
             { (millimeter) : [0, 4, 5] } as LengthBoundSpec);
 
@@ -134,19 +134,25 @@ export const hofFrame = defineFeature(function(context is Context, id is Id, def
         const railTip = panelBack + rearFoam;
         const seam = railTip + definition.electronicsDepth;
         const back = seam + coverThickness;
-        const width = panelWidth + 2 * definition.border;
-        const height = panelHeight + 2 * definition.border;
+        // Center the outside on the offset window and keep all four visible borders equal.
+        // The right side of the panel is farthest from the window center.
+        const width = 2 * (panelWidth / 2 - windowX + definition.border);
+        const height = windowHeight + width - windowWidth;
+        const left = windowX - width / 2;
+        const right = windowX + width / 2;
+        const bottom = windowY - height / 2;
+        const top = windowY + height / 2;
         const pocketWidth = panelWidth + 2 * definition.panelClearance;
         const pocketHeight = panelHeight + 2 * definition.panelClearance;
         const locatorWall = 1.6 * millimeter;
         const overlap = 0.1 * millimeter;
         const overshoot = 1 * millimeter;
         const postHalf = 4 * millimeter;
-        const postX = width / 2 - 5 * millimeter;
-        const postY = height / 2 - 5 * millimeter;
         const screwPositions = [
-            vector(-postX, -postY), vector(postX, -postY),
-            vector(-postX, postY), vector(postX, postY)
+            vector(left + 5 * millimeter, bottom + 5 * millimeter),
+            vector(right - 5 * millimeter, bottom + 5 * millimeter),
+            vector(left + 5 * millimeter, top - 5 * millimeter),
+            vector(right - 5 * millimeter, top - 5 * millimeter)
         ];
         const buttonX = -panelWidth / 2 + definition.buttonFromLeft;
         const buttonY = -panelHeight / 2 + definition.buttonFromBottom;
@@ -154,10 +160,10 @@ export const hofFrame = defineFeature(function(context is Context, id is Id, def
         const shaftRadius = 3 * millimeter;
         const guideRadius = shaftRadius + 0.3 * millimeter;
         const collarRadius = 5 * millimeter;
-        const innerLeft = -width / 2 + wall;
+        const innerLeft = left + wall;
         const collarEnd = innerLeft + 2 * millimeter;
         const stopX = collarEnd + definition.plungerTravel;
-        const fingerX = -width / 2 - 2 * millimeter;
+        const fingerX = left - 2 * millimeter;
         const tipX = buttonX - definition.buttonGap;
         const tipShoulderX = tipX - 3 * millimeter;
         const guidePositions = [
@@ -189,8 +195,8 @@ export const hofFrame = defineFeature(function(context is Context, id is Id, def
             throw regenError("PCB or screw heads are too close to the glass. Increase button depth or reduce its height above the PCB.",
                 ["buttonDepth", "pcbButtonHeight"]);
         }
-        if (pcbLeft < -width / 2 + wall + 0.5 * millimeter ||
-            pcbLeft + pcbWidth > width / 2 - wall - 0.5 * millimeter)
+        if (pcbLeft < left + wall + 0.5 * millimeter ||
+            pcbLeft + pcbWidth > right - wall - 0.5 * millimeter)
         {
             throw regenError("The PCB would hit a side wall. Adjust the button's horizontal position or PCB projection.",
                 ["buttonFromLeft", "pcbButtonProjection"]);
@@ -206,11 +212,11 @@ export const hofFrame = defineFeature(function(context is Context, id is Id, def
         if (definition.part == FramePart.ASSEMBLED || definition.part == FramePart.FRONT)
         {
             const housing = frameCuboid(context, id + "housing",
-                vector(-width / 2, -height / 2, frontZ),
-                vector(width / 2, height / 2, seam));
+                vector(left, bottom, frontZ),
+                vector(right, top, seam));
             const cavity = frameCuboid(context, id + "cavity",
-                vector(-width / 2 + wall, -height / 2 + wall, frontThickness),
-                vector(width / 2 - wall, height / 2 - wall, seam + overshoot));
+                vector(left + wall, bottom + wall, frontThickness),
+                vector(right - wall, top - wall, seam + overshoot));
             subtract(context, id + "hollow", housing, [cavity]);
             const window = frameCuboid(context, id + "window",
                 vector(windowX - windowWidth / 2, windowY - windowHeight / 2, frontZ - overshoot),
@@ -219,12 +225,17 @@ export const hofFrame = defineFeature(function(context is Context, id is Id, def
 
             if (definition.frontRadius > 0 * millimeter)
             {
-                // Only the eight front perimeter edges, never the display seat or rear rim.
                 const frontEdges = qCoincidesWithPlane(
                     qOwnedByBody(housing, EntityType.EDGE),
                     plane(vector(0 * millimeter, 0 * millimeter, frontZ), vector(0, 0, 1)));
+                const innerEdges = qUnion([
+                    qContainsPoint(frontEdges, vector(windowX - windowWidth / 2, windowY, frontZ)),
+                    qContainsPoint(frontEdges, vector(windowX + windowWidth / 2, windowY, frontZ)),
+                    qContainsPoint(frontEdges, vector(windowX, windowY - windowHeight / 2, frontZ)),
+                    qContainsPoint(frontEdges, vector(windowX, windowY + windowHeight / 2, frontZ))
+                ]);
                 opFillet(context, id + "roundFront", {
-                            "entities" : frontEdges,
+                            "entities" : innerEdges,
                             "radius" : definition.frontRadius
                         });
             }
@@ -264,7 +275,7 @@ export const hofFrame = defineFeature(function(context is Context, id is Id, def
             }
             subtract(context, id + "drillPilots", housing, pilots);
             const buttonBore = frameXCylinder(context, id + "buttonBore",
-                -width / 2 - overshoot, innerLeft + overshoot,
+                left - overshoot, innerLeft + overshoot,
                 buttonY, buttonZ, guideRadius);
             subtract(context, id + "openButtonBore", housing, [buttonBore]);
             setProperty(context, {
@@ -278,8 +289,8 @@ export const hofFrame = defineFeature(function(context is Context, id is Id, def
         if (definition.part == FramePart.ASSEMBLED || definition.part == FramePart.REAR)
         {
             const cover = frameCuboid(context, id + "cover",
-                vector(-width / 2, -height / 2, seam),
-                vector(width / 2, height / 2, back));
+                vector(left, bottom, seam),
+                vector(right, top, back));
             var coverBodies = [cover];
             // Retain the same glass borders after rotating the panel: now top and bottom.
             for (var i = 0; i < 2; i += 1)
