@@ -74,9 +74,10 @@ implemented behavior and build instructions.
   selection, readback, and publication tag last. Validated frames are mapped
   read-only; missing/corrupt photos generate white, but I/O faults remain
   explicit. Landscape is native at 800 x 480; portrait rotates clockwise into it.
-- Both modes render the same 120 x 48 status box with full battery icon and
-  unknown `?%`, up-to-24-pixel text, and 16-pixel corner margins. No fake charge
-  percentage. Saved pixels are unchanged. Font/license details and accepted
+- Both modes can render the same optional 68 x 28 status box with a compact
+  battery icon and unknown `?%`, up-to-14-pixel text, and 9-pixel corner
+  margins. Saved frame metadata controls whether it appears; old records default
+  to enabled. Saved pixels are unchanged. Font/license details and accepted
   hardware observations are in the [README](README.md).
 - The XIAO ESP32-S3 Plus has 16 MiB flash and 8 MiB octal PSRAM at 40 MHz.
   Large ordinary
@@ -186,7 +187,7 @@ What each refresh shows when a photo may be missing:
 | --- | --- |
 | First boot, or never uploaded | White default frame + battery box |
 | Stored photo fails validation | White default frame + battery box (corruption logged) |
-| Valid photo saved | Saved photo + battery box |
+| Valid photo saved | Saved photo, with battery box if enabled in frame metadata |
 | Upload received, then decode/save fails, valid photo saved | No refresh; panel left unchanged; error on web page |
 | Upload received, then decode/save fails, **no** valid photo saved | No refresh; panel left unchanged; error on web page |
 | Upload never received (timeout, disconnect, rejected) | No refresh; panel left unchanged |
@@ -215,9 +216,9 @@ it into the stored photo, so the value is current on each daily refresh.
   cutoff remains the protection; at worst the frame simply switches off. A
   failed reading cannot set the low-battery latch, but brownout and
   unfinished-work latching still apply.
-- Style: black text on a white box with a black border. Initial dimensions:
-  **120 x 48 pixels**, with up to **24-pixel-high smooth text** and a **16-pixel
-  margin** from the two edges of the selected corner. Use a smooth font
+- Style: black text on a white box with a black border. For the 7.3-inch panel,
+  use **68 x 28 pixels**, with up to **14-pixel-high smooth text** and a
+  **9-pixel margin** from the two edges of the selected corner. Use a smooth font
   rather than the test screen's bitmap style; select the font and rendering
   support during implementation. Fit the full battery symbol and `100%` together
   without clipping. Verify legibility and adjust after a panel preview.

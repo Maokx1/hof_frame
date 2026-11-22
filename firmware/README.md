@@ -197,7 +197,8 @@ arms only the RTC timer; a later wake rechecks button release.
    voltage-divider input (`~%`); it shows `?%` if measurement is unavailable.
    The estimate is not calibrated and is not a battery-protection feature.
 3. Select portrait (480 x 800) or landscape (800 x 480), Stretch or Fit,
-   and the battery-box corner. Choose PNG/JPEG up to **7 MB (7,000,000 bytes)**.
+   whether to show the frame battery indicator, and its corner. Choose
+   PNG/JPEG up to **7 MB (7,000,000 bytes)**.
 4. The browser normalizes to display-sized PNG, also limited to
    **7 MB (7,000,000 bytes)**.
    Stretch fills the layout; Fit preserves the photo with white borders.
@@ -315,14 +316,14 @@ valid slot; storage I/O failures are explicit, not missing-frame fallbacks.
 No valid photo generates a white default at render time, not a stored fixture.
 
 Validated flash is mapped read-only for display. Saved pixels are not modified
-by the overlay: a 120 x 48 white box, 2-pixel black border, 16-pixel corner
-margins, full 17 x 11 battery icon, one font-space before the percentage or `?%`
-label, and up-to-24-pixel text. The full icon
-is a fixed symbol, not a measured charge level. Orientation/corner metadata
-rotates placement and text. The panel is powered off and SPI bus/device freed
-after each refresh; failures attempt emergency power cutoff.
+by the optional overlay: a 68 x 28 white box, 1-pixel black border, 9-pixel
+corner margins, 10 x 7 battery icon, one font-space before the `?%` label, and
+up-to-14-pixel text. The full icon is a fixed symbol, not a measured charge
+level. Orientation/corner metadata rotates placement and text. The panel is
+powered off and SPI bus/device freed after each refresh; failures attempt
+emergency power cutoff.
 
-The 5,760-byte overlay uses `swash` and the subset
+The 1,904-byte overlay uses `swash` and the subset
 [DejaVu Sans font](assets/status-font.ttf), distributed under the
 [Bitstream Vera license](assets/DejaVu-LICENSE.txt). To regenerate:
 
