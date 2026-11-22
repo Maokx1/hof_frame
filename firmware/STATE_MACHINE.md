@@ -317,7 +317,8 @@ within the gesture window; `timeout` means the window expired first.
   battery check, so a quick second press is not missed.
   Current bring-up timing starts at Rust application entry, after bootloader
   execution; edges before GPIO sampling are not captured. The normal path
-  classifies before logging/recovery work; battery sampling is not implemented.
+  classifies before logging/recovery work; D9 battery sampling is only used for
+  the website estimate and is not a low-voltage guard.
 
 ## Upload and image transaction
 

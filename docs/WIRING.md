@@ -78,17 +78,19 @@ module header + ─────────── leave disconnected
 
 The EE04 display configuration uses GPIO4, 7, 9, 10, 38, 43, and 44; its
 buttons use GPIO2, 3, and 5. GPIO8/D9 is not assigned by that configuration
-and is an ADC1-capable candidate for the external divider. Verify that the
-pad is accessible and uncommitted on the received board before wiring. A
-button does not need to be removed for this pin assignment. A typical 5:1
-divider produces about 0.96 V at 4.8 V pack and 1.2 V at 6.0 V pack; verify
-the module ratio and ADC range, then calibrate against a multimeter at two or
-more pack voltages. Sample before Wi-Fi if firmware uses ADC2; GPIO8 is ADC1.
+and is an ADC1 input used for the external divider. Verify that the pad is
+accessible and uncommitted on the received board before wiring. A button does
+not need to be removed for this pin assignment. A typical 5:1 divider
+produces about 0.96 V at 4.8 V pack and 1.2 V at 6.0 V pack; verify the module
+ratio and ADC range, then calibrate against a multimeter at two or more pack
+voltages before relying on the estimate. GPIO8 is ADC1.
 
-The battery measurement and software low-voltage latch are not yet implemented
-in firmware. Until calibrated battery sensing is available, treat the
-converter cutoff as the only low-battery protection and do not claim a
-measured battery percentage.
+Firmware samples the divider on D9/GPIO8 and shows a rough voltage-based
+percentage estimate on the upload website. The estimate uses the
+documented 5:1 ratio and 4.4–5.8 V pack range; it is not calibrated and does
+not qualify battery protection. The website shows `?%` when ADC setup, reading,
+or voltage-range validation fails. The software low-voltage latch is not
+implemented, so treat the converter cutoff as the only low-battery protection.
 
 ## Bring-up
 

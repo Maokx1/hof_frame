@@ -12,7 +12,7 @@ firmware modes.
 | Deep sleep | Real; native USB disconnects | Simulated; logs continue |
 | Scheduled refresh | 24 hours after completion | 60 seconds after completion |
 | Manual-refresh limit | One hour after manual completion | One hour after manual completion |
-| Battery | Measurement/protection not yet qualified | Explicitly simulated safe for development; label remains `?%` |
+| Battery | Website shows a voltage-based `~%` estimate (`?%` if unavailable); protection is not qualified | Explicitly simulated safe for development; voltage-based estimate is display-only |
 | Runtime recovery | Persistent `hof_safety` NVS | `hof_usb`, explicitly reset to Clean on reboot |
 | KEY1 / GPIO3 | Unused; no simulation behavior | Toggles separate simulated fault while idle |
 
@@ -80,8 +80,9 @@ GPIO43.
 The frame uses four AAA NiMH cells and the external 5 V converter through
 EE04 USB-C. Leave the JST Li-ion connector empty: the board's built-in battery
 ADC monitors only a single-cell Li-ion pack on that connector. The NiMH pack
-voltage divider is planned for D9/GPIO8; verify pad access and calibration
-before enabling battery protection. See [WIRING.md](../docs/WIRING.md) and
+voltage divider connects to D9/GPIO8; firmware uses it for a rough website
+estimate, not battery protection. Verify pad access and calibrate the reading
+before relying on the estimate. See [WIRING.md](../docs/WIRING.md) and
 [PLAN.md](../docs/PLAN.md#board-interface).
 
 ## Runtime safety and recovery
@@ -192,6 +193,9 @@ arms only the RTC timer; a later wake rechecks button release.
    warning. One client at a time.
 2. Open **[http://192.168.4.1](http://192.168.4.1)**. DHCP uses the explicitly configured
    `192.168.4.1/24` subnet; the ready log checks the actual interface address.
+   The website estimates battery percentage from the documented D9/GPIO8
+   voltage-divider input (`~%`); it shows `?%` if measurement is unavailable.
+   The estimate is not calibrated and is not a battery-protection feature.
 3. Select portrait (480 x 800) or landscape (800 x 480), Stretch or Fit,
    and the battery-box corner. Choose PNG/JPEG up to **7 MB (7,000,000 bytes)**.
 4. The browser normalizes to display-sized PNG, also limited to
