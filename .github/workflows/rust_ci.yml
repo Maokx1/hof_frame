@@ -40,16 +40,31 @@ jobs:
           buildtargets: esp32s3
           version: "1.100.0.0"
           ldproxy: true
+      - name: Determine Python version
+        id: python
+        run: echo "version=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')" >> "$GITHUB_OUTPUT"
+      - name: Cache ESP-IDF dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            firmware/.embuild/espressif/esp-idf/v5.5.3
+            firmware/.embuild/espressif/tools
+            firmware/.embuild/espressif/python_env
+            firmware/.embuild/espressif/espidf.constraints.v5.5.txt
+          key: ${{ runner.os }}-${{ runner.arch }}-esp-idf-${{ steps.python.outputs.version }}-${{ hashFiles('firmware/.cargo/config.toml', 'firmware/Cargo.lock') }}
       - name: Enable caching
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: firmware
+          key: ${{ matrix.action.command }}
       - name: Run command
         run: cargo ${{ matrix.action.command }} ${{ matrix.action.args }}
 
   host-tests:
     name: Host Tests
     runs-on: ubuntu-latest
+    env:
+      RUSTUP_TOOLCHAIN: stable
     defaults:
       run:
         working-directory: firmware

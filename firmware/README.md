@@ -501,6 +501,9 @@ cargo fmt --all -- --check
 ```
 
 CI workflows live in the repository-root [.github/workflows](../.github/workflows).
+GitHub Actions caches Cargo dependencies and ESP-IDF tools; a new cache key
+requires one successful run to populate it. The ESP Rust toolchain itself is
+still installed on each runner.
 See [STATE_MACHINE.md](STATE_MACHINE.md) for target contracts and battery work.
 
 ## Validation and acceptance
