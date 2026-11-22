@@ -4,16 +4,16 @@ use swash::{
     FontRef,
 };
 
-pub const BOX_WIDTH: usize = 120;
-pub const BOX_HEIGHT: usize = 48;
-pub const MARGIN: usize = 16;
-const BORDER: usize = 2;
-const TEXT_HEIGHT: usize = 24;
+pub const BOX_WIDTH: usize = 68;
+pub const BOX_HEIGHT: usize = 28;
+pub const MARGIN: usize = 9;
+const BORDER: usize = 1;
+const TEXT_HEIGHT: usize = 14;
 const WHITE: u8 = 1;
 const BLACK: u8 = 0;
-const ICON_WIDTH: usize = 17;
-const ICON_HEIGHT: usize = 11;
-const PADDING: usize = 5;
+const ICON_WIDTH: usize = 10;
+const ICON_HEIGHT: usize = 7;
+const PADDING: usize = 3;
 
 pub struct StatusOverlay {
     metadata: Metadata,
@@ -24,6 +24,14 @@ pub struct StatusOverlay {
 
 impl StatusOverlay {
     pub fn new(metadata: Metadata, percentage: Option<u8>) -> Result<Self, String> {
+        if !metadata.battery_indicator_enabled {
+            return Ok(Self {
+                metadata,
+                left: 0,
+                top: 0,
+                pixels: Vec::new(),
+            });
+        }
         let text = match percentage {
             Some(value) if value <= 100 => format!(" {value}%"),
             Some(_) => return Err("battery percentage exceeds 100".into()),
@@ -178,7 +186,10 @@ impl StatusOverlay {
     }
 
     pub fn pixel(&self, native_x: usize, native_y: usize) -> Option<u8> {
-        if native_x >= frame::WIDTH || native_y >= frame::HEIGHT {
+        if !self.metadata.battery_indicator_enabled
+            || native_x >= frame::WIDTH
+            || native_y >= frame::HEIGHT
+        {
             return None;
         }
         let (x, y) = match self.metadata.orientation {

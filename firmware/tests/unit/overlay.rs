@@ -13,6 +13,7 @@ fn all_corners_follow_layout_rotation_and_exact_margins() {
                 Metadata {
                     orientation,
                     battery_corner,
+                    battery_indicator_enabled: true,
                 },
                 None,
             )
@@ -45,7 +46,7 @@ fn all_corners_follow_layout_rotation_and_exact_margins() {
 }
 
 #[test]
-fn unknown_text_is_24_pixels_high_and_all_percentages_fit() {
+fn unknown_text_fits_reduced_height_and_all_percentages_fit() {
     let unknown = StatusOverlay::new(Default::default(), None).unwrap();
     let mut rendered = std::collections::HashSet::new();
     rendered.insert(unknown.pixels.clone());
@@ -72,6 +73,25 @@ fn unknown_text_is_24_pixels_high_and_all_percentages_fit() {
     assert!(StatusOverlay::new(Default::default(), Some(101)).is_err());
     assert_eq!(unknown.pixel(frame::WIDTH, 0), None);
     assert_eq!(unknown.pixel(0, frame::HEIGHT), None);
+}
+
+#[test]
+fn disabled_indicator_has_no_pixels() {
+    let metadata = Metadata {
+        battery_indicator_enabled: false,
+        ..Metadata::default()
+    };
+    let overlay = StatusOverlay::new(metadata, Some(50)).unwrap();
+
+    assert!(overlay.pixels.is_empty());
+    assert_eq!(overlay.pixel(0, 0), None);
+    assert_eq!(overlay.pixel(frame::WIDTH - 1, frame::HEIGHT - 1), None);
+}
+
+#[test]
+fn indicator_size_is_scaled_for_the_7_3_inch_panel() {
+    assert!(BOX_WIDTH * 5 <= 120 * 3);
+    assert!(BOX_HEIGHT * 5 <= 48 * 3);
 }
 
 #[test]

@@ -204,16 +204,20 @@ fn refresh_saved_frame(
         .current
         .map(|record| record.metadata)
         .unwrap_or_default();
-    log::info!("battery overlay: unknown (?%); calibrated measurement unavailable");
+    if metadata.battery_indicator_enabled {
+        log::info!("battery overlay: unknown (?%); calibrated measurement unavailable");
+        log::info!(
+            "battery overlay: corner={:?}, orientation={:?}",
+            metadata.battery_corner,
+            metadata.orientation
+        );
+    } else {
+        log::info!("battery overlay: disabled");
+    }
     let overlay = firmware::overlay::StatusOverlay::new(metadata, None).map_err(|error| {
         log::error!("battery overlay rendering failed: {error}; panel remains OFF");
         EspError::from(esp_idf_svc::sys::ESP_ERR_INVALID_STATE).unwrap()
     })?;
-    log::info!(
-        "battery overlay: corner={:?}, orientation={:?}",
-        metadata.battery_corner,
-        metadata.orientation
-    );
     if let Some(record) = scan.current {
         let mapped = storage.map(record)?;
         log::info!("rendering validated native-order frame: {record:?}; live status overlay");

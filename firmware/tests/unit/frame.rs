@@ -132,6 +132,7 @@ fn full_frame_commit_and_reload_preserve_metadata_and_pixels() {
     let metadata = Metadata {
         orientation: Orientation::Landscape,
         battery_corner: Corner::BottomLeft,
+        battery_indicator_enabled: false,
     };
     let record = commit(&mut flash, &pixels, metadata).unwrap();
     assert_eq!(record.generation, 1);
@@ -298,7 +299,16 @@ fn unsupported_metadata_is_rejected_even_with_valid_header_crc() {
         metadata: Metadata::default(),
         payload_crc: 0,
     };
-    for (offset, value) in [(4, 2), (5, 9), (6, 9), (7, 8), (8, 0), (10, 0), (13, 0)] {
+    for (offset, value) in [
+        (4, 2),
+        (5, 9),
+        (6, 4),
+        (6, 9),
+        (7, 8),
+        (8, 0),
+        (10, 0),
+        (13, 0),
+    ] {
         let mut bytes = header(record);
         bytes[offset] = value;
         let checksum = crc32(&bytes[..28]);

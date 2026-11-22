@@ -91,6 +91,7 @@ form.addEventListener('submit', async event => {
   const orientation = document.getElementById('orientation').value;
   const sizing = document.getElementById('sizing').value;
   const corner = document.getElementById('corner').value;
+  const batteryIndicator = document.getElementById('battery-indicator').checked;
   controls.forEach(control => { control.disabled = true; });
   showDiagnostic();
   document.getElementById('send').disabled = true;
@@ -131,7 +132,7 @@ form.addEventListener('submit', async event => {
   showProgress(0, 0, t('Wysyłanie'));
   sessionState(t('Trwa wysyłanie'), t('W toku'), t('Czas zamknięcia hotspotu zależy teraz od przesyłania i aktualizacji ekranu.'));
   const xhr = new XMLHttpRequest();
-  xhr.open('POST', `/upload?orientation=${orientation}&corner=${corner}`);
+  xhr.open('POST', `/upload?orientation=${orientation}&corner=${corner}&indicator=${batteryIndicator ? 'on' : 'off'}`);
   xhr.setRequestHeader('Content-Type', 'image/png');
   xhr.timeout = __PROCESS_TIMEOUT_MS__;
   xhr.upload.onprogress = e => {

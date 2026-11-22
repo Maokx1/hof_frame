@@ -222,6 +222,7 @@ pub fn request(reader: &mut impl BufRead) -> Result<Request, ReceiveError> {
     }
     let mut orientation = None;
     let mut corner = None;
+    let mut battery_indicator_enabled = None;
     for parameter in query.split('&') {
         let (name, value) = parameter
             .split_once('=')
@@ -243,6 +244,13 @@ pub fn request(reader: &mut impl BufRead) -> Result<Request, ReceiveError> {
                     _ => return Err(ReceiveError::InvalidRequest),
                 })
             }
+            ("indicator", value) if battery_indicator_enabled.is_none() => {
+                battery_indicator_enabled = Some(match value {
+                    "on" => true,
+                    "off" => false,
+                    _ => return Err(ReceiveError::InvalidRequest),
+                })
+            }
             _ => return Err(ReceiveError::InvalidRequest),
         }
     }
@@ -255,6 +263,7 @@ pub fn request(reader: &mut impl BufRead) -> Result<Request, ReceiveError> {
         metadata: Metadata {
             orientation: orientation.ok_or(ReceiveError::InvalidRequest)?,
             battery_corner: corner.ok_or(ReceiveError::InvalidRequest)?,
+            battery_indicator_enabled: battery_indicator_enabled.unwrap_or(true),
         },
     })
 }

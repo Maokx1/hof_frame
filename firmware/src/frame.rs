@@ -6,6 +6,9 @@ pub const STORAGE_BYTES: usize = 2 * SLOT_BYTES;
 pub const PAYLOAD_OFFSET: usize = 4096;
 const HEADER_BYTES: usize = 36;
 const CHUNK_BYTES: usize = 1024;
+const BATTERY_CORNER_MASK: u8 = 0x03;
+const BATTERY_INDICATOR_DISABLED: u8 = 0x80;
+const RESERVED_METADATA_MASK: u8 = 0x7C;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
@@ -27,6 +30,7 @@ pub enum Corner {
 pub struct Metadata {
     pub orientation: Orientation,
     pub battery_corner: Corner,
+    pub battery_indicator_enabled: bool,
 }
 
 impl Default for Metadata {
@@ -34,6 +38,7 @@ impl Default for Metadata {
         Self {
             orientation: Orientation::Landscape,
             battery_corner: Corner::TopRight,
+            battery_indicator_enabled: true,
         }
     }
 }
@@ -116,7 +121,13 @@ fn header(record: FrameRecord) -> [u8; HEADER_BYTES] {
     bytes[..4].copy_from_slice(b"HOF1");
     bytes[4] = 1;
     bytes[5] = record.metadata.orientation as u8;
-    bytes[6] = record.metadata.battery_corner as u8;
+    // Existing corner-only values remain indicator-enabled.
+    bytes[6] = record.metadata.battery_corner as u8
+        | if record.metadata.battery_indicator_enabled {
+            0
+        } else {
+            BATTERY_INDICATOR_DISABLED
+        };
     bytes[7] = 4;
     bytes[8..10].copy_from_slice(&(WIDTH as u16).to_le_bytes());
     bytes[10..12].copy_from_slice(&(HEIGHT as u16).to_le_bytes());
@@ -132,6 +143,7 @@ fn header(record: FrameRecord) -> [u8; HEADER_BYTES] {
 fn parse_header(bytes: &[u8; HEADER_BYTES], slot: usize) -> Option<FrameRecord> {
     if &bytes[..4] != b"HOF1"
         || bytes[4] != 1
+        || bytes[6] & RESERVED_METADATA_MASK != 0
         || bytes[7] != 4
         || u16::from_le_bytes(bytes[8..10].try_into().ok()?) as usize != WIDTH
         || u16::from_le_bytes(bytes[10..12].try_into().ok()?) as usize != HEIGHT
@@ -146,7 +158,7 @@ fn parse_header(bytes: &[u8; HEADER_BYTES], slot: usize) -> Option<FrameRecord> 
         1 => Orientation::Landscape,
         _ => return None,
     };
-    let battery_corner = match bytes[6] {
+    let battery_corner = match bytes[6] & BATTERY_CORNER_MASK {
         0 => Corner::TopRight,
         1 => Corner::TopLeft,
         2 => Corner::BottomLeft,
@@ -163,6 +175,7 @@ fn parse_header(bytes: &[u8; HEADER_BYTES], slot: usize) -> Option<FrameRecord> 
         metadata: Metadata {
             orientation,
             battery_corner,
+            battery_indicator_enabled: bytes[6] & BATTERY_INDICATOR_DISABLED == 0,
         },
         payload_crc: u32::from_le_bytes(bytes[24..28].try_into().ok()?),
     })

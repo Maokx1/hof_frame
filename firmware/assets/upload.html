@@ -56,6 +56,8 @@
                         <option value="fit">Całe zdjęcie (białe marginesy)</option>
                     </select>
                 </div>
+                <label class="field battery-toggle"><input id="battery-indicator" type="checkbox" checked>
+                    Pokaż wskaźnik baterii na ekranie ramki</label>
                 <label class="field">Położenie wskaźnika baterii<select id="corner">
                         <option value="top-right">Prawy górny róg</option>
                         <option value="top-left">Lewy górny róg</option>
@@ -64,7 +66,7 @@
                     </select></label>
             </div>
         </section>
-        <p class="note">Wskaźnik baterii pojawi się w wybranym rogu zdjęcia. <strong>?%</strong> oznacza problem z
+        <p class="note">Jeśli włączony, wskaźnik baterii pojawi się w wybranym rogu zdjęcia. <strong>?%</strong> oznacza problem z
             pomiarem stanu baterii.
         </p>
         <button id="send">Dodaj do Hall of Fame <span aria-hidden="true">↗</span></button>
