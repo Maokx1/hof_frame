@@ -27,6 +27,34 @@ const COVERAGE: [[u16; 4]; 4] = [[0, 8, 2, 10], [12, 4, 14, 6], [3, 11, 1, 9], [
 
 type Glyphs = Vec<(usize, Option<Image>)>;
 
+#[derive(Debug, PartialEq, Eq, thiserror::Error)]
+pub enum OverlayError {
+    /// The battery percentage is above 100.
+    #[error("battery percentage {0} exceeds 100")]
+    InvalidPercentage(u8),
+    /// The embedded status font cannot be parsed or measured.
+    #[error("invalid status font")]
+    InvalidFont,
+    /// The embedded status font has no glyph for a status character.
+    #[error("status font is missing {0:?}")]
+    MissingGlyph(char),
+    /// A status glyph could not be rasterized.
+    #[error("cannot render status glyph {0:?}")]
+    UnrenderableGlyph(char),
+    /// The status text has no glyphs to lay out.
+    #[error("empty status text")]
+    EmptyText,
+    /// The status text cannot fit inside the battery box.
+    #[error("status text does not fit the battery box")]
+    TextTooLarge,
+    /// A glyph would draw over the battery box border.
+    #[error("status glyph clips the battery box")]
+    GlyphClipped,
+    /// The overlay pixel buffer could not be allocated.
+    #[error("cannot allocate status overlay pixels")]
+    OutOfMemory,
+}
+
 struct TextLayout {
     glyphs: Glyphs,
     width: usize,
@@ -44,7 +72,7 @@ pub struct StatusOverlay {
 
 impl StatusOverlay {
     /// Build an optional status box without modifying the underlying frame.
-    pub fn new(metadata: Metadata, percentage: Option<u8>) -> Result<Self, String> {
+    pub fn new(metadata: Metadata, percentage: Option<u8>) -> Result<Self, OverlayError> {
         if !metadata.battery_indicator_enabled {
             return Ok(Self {
                 metadata,
@@ -59,7 +87,7 @@ impl StatusOverlay {
         if content_width > BOX_WIDTH - 2 * (BORDER + PADDING)
             || layout.height > BOX_HEIGHT - 2 * BORDER
         {
-            return Err("status text does not fit the battery box".into());
+            return Err(OverlayError::TextTooLarge);
         }
         let mut pixels = bordered_box()?;
         let icon_left = (BOX_WIDTH - content_width) / 2;
@@ -96,25 +124,25 @@ impl StatusOverlay {
 }
 
 /// Format display-only battery data and reject percentages above 100.
-fn status_text(percentage: Option<u8>) -> Result<String, String> {
+fn status_text(percentage: Option<u8>) -> Result<String, OverlayError> {
     match percentage {
         Some(value) if value <= 100 => Ok(format!(" {value}%")),
-        Some(_) => Err("battery percentage exceeds 100".into()),
+        Some(value) => Err(OverlayError::InvalidPercentage(value)),
         None => Ok(" ?%".into()),
     }
 }
 
 /// Resolve glyphs, fit their size, and calculate the shared text baseline.
-fn layout_text(text: &str) -> Result<TextLayout, String> {
+fn layout_text(text: &str) -> Result<TextLayout, OverlayError> {
     let font = FontRef::from_index(include_bytes!("../assets/status-font.ttf"), 0)
-        .ok_or("invalid status font")?;
+        .ok_or(OverlayError::InvalidFont)?;
     let charmap = font.charmap();
     let ids = text
         .chars()
         .map(|ch| {
             let id = charmap.map(ch);
             if id == 0 {
-                Err(format!("status font is missing {ch:?}"))
+                Err(OverlayError::MissingGlyph(ch))
             } else {
                 Ok((ch, id))
             }
@@ -127,9 +155,9 @@ fn layout_text(text: &str) -> Result<TextLayout, String> {
             &mut context.builder(font).size(32.0).build(),
             charmap.map('?'),
         )
-        .ok_or("cannot render status font")?;
+        .ok_or(OverlayError::UnrenderableGlyph('?'))?;
     if question.placement.height == 0 {
-        return Err("invalid status font bounds".into());
+        return Err(OverlayError::InvalidFont);
     }
     let size = 32.0 * TEXT_HEIGHT as f32 / question.placement.height as f32;
     let (glyphs, width) = fit_glyphs(font, &ids, &mut context, &renderer, size)?;
@@ -137,7 +165,7 @@ fn layout_text(text: &str) -> Result<TextLayout, String> {
         .iter()
         .map(|(_, image)| image.as_ref().map_or(0, |image| image.placement.top))
         .max()
-        .ok_or("empty status text")?;
+        .ok_or(OverlayError::EmptyText)?;
     let descent = glyphs
         .iter()
         .map(|(_, image)| {
@@ -146,8 +174,8 @@ fn layout_text(text: &str) -> Result<TextLayout, String> {
             })
         })
         .min()
-        .ok_or("empty status text")?;
-    let height = usize::try_from(ascent - descent).map_err(|_| "invalid font bounds")?;
+        .ok_or(OverlayError::EmptyText)?;
+    let height = usize::try_from(ascent - descent).map_err(|_| OverlayError::InvalidFont)?;
     Ok(TextLayout {
         glyphs,
         width,
@@ -163,7 +191,7 @@ fn fit_glyphs(
     context: &mut ScaleContext,
     renderer: &Render<'_>,
     mut size: f32,
-) -> Result<(Glyphs, usize), String> {
+) -> Result<(Glyphs, usize), OverlayError> {
     let budget = BOX_WIDTH - 2 * (BORDER + PADDING) - ICON_WIDTH;
     loop {
         let metrics = font.glyph_metrics(&[]).scale(size);
@@ -178,7 +206,7 @@ fn fit_glyphs(
             } else {
                 let image = renderer
                     .render(&mut scaler, id)
-                    .ok_or_else(|| format!("cannot render status glyph {ch:?}"))?;
+                    .ok_or(OverlayError::UnrenderableGlyph(ch))?;
                 max_height = max_height.max(image.placement.height as usize);
                 Some(image)
             };
@@ -190,17 +218,17 @@ fn fit_glyphs(
         }
         size -= 0.5;
         if size <= 0.0 {
-            return Err("status text cannot fit beside the battery icon".into());
+            return Err(OverlayError::TextTooLarge);
         }
     }
 }
 
 /// Allocate the white status box and draw its black border.
-fn bordered_box() -> Result<Vec<u8>, String> {
+fn bordered_box() -> Result<Vec<u8>, OverlayError> {
     let mut pixels = Vec::new();
     pixels
         .try_reserve_exact(BOX_WIDTH * BOX_HEIGHT)
-        .map_err(|e| e.to_string())?;
+        .map_err(|_| OverlayError::OutOfMemory)?;
     pixels.resize(BOX_WIDTH * BOX_HEIGHT, WHITE);
     for y in 0..BOX_HEIGHT {
         for x in 0..BOX_WIDTH {
@@ -229,7 +257,7 @@ fn draw_icon(pixels: &mut [u8], left: usize) {
 }
 
 /// Place glyphs on a centered baseline beside the icon.
-fn draw_text(pixels: &mut [u8], layout: TextLayout, left: usize) -> Result<(), String> {
+fn draw_text(pixels: &mut [u8], layout: TextLayout, left: usize) -> Result<(), OverlayError> {
     let mut pen = left as i32;
     let baseline = ((BOX_HEIGHT - layout.height) / 2) as i32 + layout.ascent;
     for (advance, image) in layout.glyphs {
@@ -247,7 +275,7 @@ fn draw_text(pixels: &mut [u8], layout: TextLayout, left: usize) -> Result<(), S
 }
 
 /// Dither glyph coverage to panel colors, rejecting any border clipping.
-fn draw_glyph(pixels: &mut [u8], image: &Image, left: i32, top: i32) -> Result<(), String> {
+fn draw_glyph(pixels: &mut [u8], image: &Image, left: i32, top: i32) -> Result<(), OverlayError> {
     let width = image.placement.width as usize;
     for y in 0..image.placement.height as usize {
         for x in 0..width {
@@ -258,7 +286,7 @@ fn draw_glyph(pixels: &mut [u8], image: &Image, left: i32, top: i32) -> Result<(
                 || dy < BORDER as i32
                 || dy >= (BOX_HEIGHT - BORDER) as i32
             {
-                return Err("status glyph clips the battery box".into());
+                return Err(OverlayError::GlyphClipped);
             }
             let dx = dx as usize;
             let dy = dy as usize;

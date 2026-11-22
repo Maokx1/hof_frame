@@ -166,7 +166,7 @@ fn malformed_wrong_dimensions_and_deadline_are_rejected() {
     );
     let mut output = vec![0; frame::FRAME_BYTES];
     assert!(decode(&encoded, Default::default(), &mut output, || Err(
-        "deadline"
+        DecodeError::DeadlineExceeded
     ))
     .is_err());
     assert!(decode(

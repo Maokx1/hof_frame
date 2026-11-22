@@ -86,9 +86,23 @@ pub struct Epd {
     spi: sys::spi_device_handle_t,
 }
 
-/// Construct the driver's standard BUSY timeout error.
-fn timeout_error() -> EspError {
-    EspError::from(sys::ESP_ERR_TIMEOUT).expect("ESP_ERR_TIMEOUT is not ESP_OK")
+#[derive(Debug, thiserror::Error)]
+pub enum EpdError {
+    /// A GPIO or SPI call into ESP-IDF failed.
+    #[error("panel ESP-IDF call failed: {0}")]
+    Esp(#[from] EspError),
+    /// The controller stayed busy past the setup/power-operation timeout.
+    #[error("panel BUSY did not return idle within {} s", BUSY_TIMEOUT.as_secs())]
+    BusyStuck,
+    /// The refresh waveform could not be confirmed.
+    #[error("panel refresh not confirmed: {0}")]
+    Waveform(#[from] BusyTimeout),
+    /// A single SPI transaction exceeded the configured DMA limit.
+    #[error("SPI transfer of {0} bytes exceeds {MAX_TRANSFER_BYTES}")]
+    TransferTooLarge(usize),
+    /// The pixel source has no color for a panel coordinate.
+    #[error("no pixel color for panel coordinate ({x}, {y})")]
+    MissingPixel { x: usize, y: usize },
 }
 
 /// Set an already configured GPIO to its command/data/power level.
@@ -111,12 +125,12 @@ fn output_pin(pin: i32, initial_high: bool) -> Result<(), EspError> {
 
 impl Epd {
     /// Cut the EE04 panel rail without waiting for the controller.
-    pub fn disable_panel_power() -> Result<(), EspError> {
-        output_pin(PIN_PANEL_ENABLE, false)
+    pub fn disable_panel_power() -> Result<(), EpdError> {
+        Ok(output_pin(PIN_PANEL_ENABLE, false)?)
     }
 
     /// Powers the panel, configures SPI, then resets the ED2208 controller.
-    pub fn new() -> Result<Self, EspError> {
+    pub fn new() -> Result<Self, EpdError> {
         output_pin(PIN_CS, true)?;
         output_pin(PIN_DC, true)?;
         output_pin(PIN_RST, true)?;
@@ -196,22 +210,21 @@ impl Epd {
     }
 
     /// Transmit one bounded SPI transaction.
-    fn transfer(&self, bytes: &[u8]) -> Result<(), EspError> {
+    fn transfer(&self, bytes: &[u8]) -> Result<(), EpdError> {
         if bytes.is_empty() {
             return Ok(());
         }
         if bytes.len() > MAX_TRANSFER_BYTES {
-            return Err(EspError::from(sys::ESP_ERR_INVALID_SIZE)
-                .expect("ESP_ERR_INVALID_SIZE is not ESP_OK"));
+            return Err(EpdError::TransferTooLarge(bytes.len()));
         }
         let mut trans: sys::spi_transaction_t = unsafe { std::mem::zeroed() };
         trans.length = bytes.len() * 8;
         trans.__bindgen_anon_1.tx_buffer = bytes.as_ptr().cast();
-        esp!(unsafe { sys::spi_device_transmit(self.spi, &mut trans) })
+        Ok(esp!(unsafe { sys::spi_device_transmit(self.spi, &mut trans) })?)
     }
 
     /// Select the controller and send a command before switching to data mode.
-    fn begin_command(&self, command: u8) -> Result<(), EspError> {
+    fn begin_command(&self, command: u8) -> Result<(), EpdError> {
         set_level(PIN_CS, false);
         set_level(PIN_DC, false);
         if let Err(error) = self.transfer(&[command]) {
@@ -223,7 +236,7 @@ impl Epd {
     }
 
     /// Send a command/data pair and release chip select even on failure.
-    fn write_command(&self, command: u8, data: &[u8]) -> Result<(), EspError> {
+    fn write_command(&self, command: u8, data: &[u8]) -> Result<(), EpdError> {
         self.begin_command(command)?;
         let result = self.transfer(data);
         set_level(PIN_CS, true);
@@ -231,7 +244,7 @@ impl Epd {
     }
 
     /// Wait for controller idle with the setup/power-operation timeout.
-    fn wait_busy_high(&self) -> Result<(), EspError> {
+    fn wait_busy_high(&self) -> Result<(), EpdError> {
         let start = Instant::now();
         while unsafe { sys::gpio_get_level(PIN_BUSY) } == 0 {
             if start.elapsed() > BUSY_TIMEOUT {
@@ -239,7 +252,7 @@ impl Epd {
                     "panel BUSY GPIO{PIN_BUSY} did not return idle within {} s",
                     BUSY_TIMEOUT.as_secs()
                 );
-                return Err(timeout_error());
+                return Err(EpdError::BusyStuck);
             }
             sleep(Duration::from_millis(10));
         }
@@ -247,7 +260,7 @@ impl Epd {
     }
 
     /// Require a complete, plausible BUSY waveform rather than initial idle.
-    fn wait_refresh_complete(&self) -> Result<(), EspError> {
+    fn wait_refresh_complete(&self) -> Result<(), EpdError> {
         let start = Instant::now();
         let mut busy = RefreshBusy::default();
         let mut logged_assertion = false;
@@ -268,8 +281,8 @@ impl Epd {
                     }
                 }
                 Err(reason) => {
-                    self.log_busy_timeout(reason, start.elapsed());
-                    return Err(timeout_error());
+                    self.log_busy_timeout(&reason, start.elapsed());
+                    return Err(reason.into());
                 }
             }
             sleep(Duration::from_millis(10));
@@ -277,7 +290,7 @@ impl Epd {
     }
 
     /// Explain why the waveform could not be confirmed without retrying it.
-    fn log_busy_timeout(&self, reason: BusyTimeout, elapsed: Duration) {
+    fn log_busy_timeout(&self, reason: &BusyTimeout, elapsed: Duration) {
         match reason {
             BusyTimeout::NeverAsserted => log::error!(
                 "ED2208 waveform did not assert BUSY within {} s (GPIO{PIN_BUSY} stayed HIGH); \
@@ -298,7 +311,7 @@ impl Epd {
     }
 
     /// Reset the controller, apply the profile, and power on its waveform engine.
-    pub fn init(&self) -> Result<(), EspError> {
+    pub fn init(&self) -> Result<(), EpdError> {
         self.hardware_reset();
         for (command, data) in INIT_SEQUENCE {
             self.write_command(*command, data)?;
@@ -308,25 +321,9 @@ impl Epd {
     }
 
     /// Streams one full frame of native 4-bit ED2208 color codes and refreshes.
-    pub fn show(&self, color_at: impl Fn(usize, usize) -> u8) -> Result<(), EspError> {
-        let mut buffer = vec![0_u8; ROWS_PER_CHUNK * BYTES_PER_ROW];
+    pub fn show(&self, color_at: impl Fn(usize, usize) -> Option<u8>) -> Result<(), EpdError> {
         self.begin_command(CMD_WRITE_RAM)?;
-
-        let result = (|| {
-            for first_row in (0..HEIGHT).step_by(ROWS_PER_CHUNK) {
-                let rows = ROWS_PER_CHUNK.min(HEIGHT - first_row);
-                for row in 0..rows {
-                    let y = first_row + row;
-                    for column in 0..BYTES_PER_ROW {
-                        let x = column * 2;
-                        buffer[row * BYTES_PER_ROW + column] =
-                            (color_at(x, y) << 4) | color_at(x + 1, y);
-                    }
-                }
-                self.transfer(&buffer[..rows * BYTES_PER_ROW])?;
-            }
-            Ok(())
-        })();
+        let result = self.stream_pixels(color_at);
         set_level(PIN_CS, true);
         result?;
 
@@ -335,8 +332,26 @@ impl Epd {
         self.wait_refresh_complete()
     }
 
+    /// Pack and transmit every pixel in bounded row chunks while chip select is low.
+    fn stream_pixels(&self, color_at: impl Fn(usize, usize) -> Option<u8>) -> Result<(), EpdError> {
+        let color = |x, y| color_at(x, y).ok_or(EpdError::MissingPixel { x, y });
+        let mut buffer = vec![0_u8; ROWS_PER_CHUNK * BYTES_PER_ROW];
+        for first_row in (0..HEIGHT).step_by(ROWS_PER_CHUNK) {
+            let rows = ROWS_PER_CHUNK.min(HEIGHT - first_row);
+            for row in 0..rows {
+                let y = first_row + row;
+                for column in 0..BYTES_PER_ROW {
+                    let x = column * 2;
+                    buffer[row * BYTES_PER_ROW + column] = (color(x, y)? << 4) | color(x + 1, y)?;
+                }
+            }
+            self.transfer(&buffer[..rows * BYTES_PER_ROW])?;
+        }
+        Ok(())
+    }
+
     /// Sends the panel power-off sequence and disables the EE04 panel rail.
-    pub fn power_off(&self) -> Result<(), EspError> {
+    pub fn power_off(&self) -> Result<(), EpdError> {
         let result = self.write_command(CMD_POWER_OFF, &[0x00]).and_then(|_| {
             sleep(Duration::from_millis(1));
             self.wait_busy_high()
@@ -347,10 +362,10 @@ impl Epd {
     }
 
     /// Disable panel power and attempt both device removal and bus release.
-    pub fn close(self) -> Result<(), EspError> {
+    pub fn close(self) -> Result<(), EpdError> {
         set_level(PIN_PANEL_ENABLE, false);
         let remove_result = unsafe { esp!(sys::spi_bus_remove_device(self.spi)) };
         let free_result = unsafe { esp!(sys::spi_bus_free(sys::spi_host_device_t_SPI2_HOST)) };
-        remove_result.and(free_result)
+        Ok(remove_result.and(free_result)?)
     }
 }

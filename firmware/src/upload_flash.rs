@@ -1,14 +1,14 @@
 use std::io::{self, BufReader, Read, Seek, SeekFrom, Write};
-use std::ptr::NonNull;
 use std::time::Instant;
 
 use esp_idf_svc::hal::delay::FreeRtos;
-use esp_idf_svc::sys::{self, esp, EspError};
+use crate::partition::{self, FlashError};
+use esp_idf_svc::sys::{self, esp};
 
 const SECTOR_BYTES: usize = 4096;
 
 pub struct FlashUpload {
-    partition: NonNull<sys::esp_partition_t>,
+    partition: partition::Partition,
     len: usize,
     deadline: Instant,
     bytes_since_yield: usize,
@@ -16,20 +16,9 @@ pub struct FlashUpload {
 
 impl FlashUpload {
     /// Open staging at offset zero and verify its configured upload capacity.
-    pub fn open(deadline: Instant) -> Result<Self, EspError> {
-        let partition = unsafe {
-            sys::esp_partition_find_first(
-                sys::esp_partition_type_t_ESP_PARTITION_TYPE_DATA,
-                sys::esp_partition_subtype_t_ESP_PARTITION_SUBTYPE_DATA_UNDEFINED,
-                c"upload".as_ptr(),
-            )
-        };
-        let partition = NonNull::new(partition.cast_mut())
-            .ok_or_else(|| EspError::from(sys::ESP_ERR_NOT_FOUND).unwrap())?;
-        if (unsafe { partition.as_ref().size } as usize) < crate::upload::MAX_UPLOAD_BYTES {
-            log::error!("Upload partition too small; flash the updated partition table");
-            return Err(EspError::from(sys::ESP_ERR_INVALID_SIZE).unwrap());
-        }
+    pub fn open(deadline: Instant) -> Result<Self, FlashError> {
+        let capacity = crate::upload::MAX_UPLOAD_BYTES;
+        let partition = partition::find(c"upload", capacity, |size| size >= capacity)?;
         Ok(Self {
             partition,
             len: 0,

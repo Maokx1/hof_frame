@@ -1,6 +1,6 @@
 //! Awake USB development cycle with real work and simulated sleep/faults.
 
-use super::State;
+use super::{AppError, State};
 use crate::{
     battery::BatterySensor,
     buttons::{self, Button},
@@ -40,27 +40,26 @@ pub struct Application {
 }
 
 impl Application {
-    /// Initialize shared hardware under a USB-only durable safety session.
+    /// Boot USB mode, halting with a logged fault if setup fails.
     pub fn boot() -> Self {
         super::initialize_runtime();
-        Epd::disable_panel_power().expect("gesture test failed to disable panel power");
-        let peripherals = Peripherals::take().expect("peripherals already taken");
-        let button = PinDriver::rtc_input(peripherals.pins.gpio2, Pull::Up)
-            .expect("failed to configure KEY0/GPIO2 as an RTC input");
-        let fault_button = PinDriver::rtc_input(peripherals.pins.gpio3, Pull::Up)
-            .expect("failed to configure KEY1/GPIO3 as an input");
+        work::require(Self::try_boot())
+    }
+
+    /// Initialize shared hardware under a USB-only durable safety session.
+    fn try_boot() -> Result<Self, AppError> {
+        Epd::disable_panel_power()?;
+        let peripherals = Peripherals::take()?;
+        let button = PinDriver::rtc_input(peripherals.pins.gpio2, Pull::Up)?;
+        let fault_button = PinDriver::rtc_input(peripherals.pins.gpio3, Pull::Up)?;
         let fault_switch = FaultSwitch::new(Instant::now(), fault_button.is_low());
-        let mut safety = Self::open_safety();
+        let mut safety = Self::open_safety()?;
         work::require(safety.begin_work());
         work::require(work::set_phase(&mut safety, WorkPhase::Setup));
-        if let Err(error) = psram::verify() {
-            log::error!("PSRAM verification failed: {error:?}");
-            work::latch_and_halt(&mut safety, error);
-        }
-        let wifi = match upload_wifi::setup(peripherals.modem) {
+        let wifi = match Self::setup_work_hardware(peripherals.modem) {
             Ok(wifi) => wifi,
             Err(error) => {
-                log::error!("upload Wi-Fi configuration failed: {error:?}");
+                log::error!("USB work hardware setup failed: {error}");
                 work::latch_and_halt(&mut safety, error);
             }
         };
@@ -68,7 +67,7 @@ impl Application {
         work::finish(&mut safety);
         log::warn!("USB mode: REAL upload/manual/scheduled display; simulated deep sleep; timer=60 s from completion; manual limit=1 h; production remains 24 h / 1 h");
         log::warn!("USB safety: simulated fault initially OFF; KEY1 toggles while idle; runtime safety namespace=hof_usb, state={:?}; production hof_safety untouched; KEY1 cannot clear real faults; battery estimate is display-only; USB power only", safety.state());
-        Self {
+        Ok(Self {
             button,
             fault_button,
             fault_switch,
@@ -79,17 +78,25 @@ impl Application {
             battery,
             schedule: RefreshSchedule::new(rtc::now_us()),
             next_status_us: 0,
-        }
+        })
+    }
+
+    /// Verify PSRAM and configure the upload hotspot inside the setup work boundary.
+    fn setup_work_hardware(
+        modem: esp_idf_svc::hal::modem::Modem<'static>,
+    ) -> Result<BlockingWifi<EspWifi<'static>>, AppError> {
+        psram::verify()?;
+        Ok(upload_wifi::setup(modem)?)
     }
 
     /// Log production diagnostics read-only, then reset only the USB namespace.
-    fn open_safety() -> Guard {
+    fn open_safety() -> Result<Guard, AppError> {
         let reset = ResetReason::get();
         log::warn!("USB session reset reason: {reset:?}; development reboot resets USB runtime guard, not production recovery");
         if let Err(error) = safety_nvs::log_production_diagnostics() {
-            log::error!("could not read production safety NVS snapshot: {error:?}");
+            log::error!("could not read production safety NVS snapshot: {error}");
         }
-        work::require(safety_nvs::open_usb_session(reset == ResetReason::Brownout))
+        Ok(safety_nvs::open_usb_session(reset == ResetReason::Brownout)?)
     }
 
     /// USB waits for KEY0 release without an immediate boot refresh.
@@ -119,7 +126,6 @@ impl Application {
                 log::info!("mock PrepareSleep: waiting for KEY0 release; timer stays active");
                 State::Idle
             }
-            State::Dispatch => unreachable!("production-only state in USB"),
         }
     }
 
@@ -209,9 +215,9 @@ impl Application {
         let outcome = match display::refresh_saved(&mut self.safety) {
             Ok(outcome) => outcome,
             Err(error) => {
-                log::error!("{source}: FAILED: {error:?}; daily deadline unchanged; no automatic physical retry");
+                log::error!("{source}: FAILED: {error}; daily deadline unchanged; no automatic physical retry");
                 if let Err(power_error) = Epd::disable_panel_power() {
-                    log::error!("{source}: emergency panel power cutoff failed: {power_error:?}");
+                    log::error!("{source}: emergency panel power cutoff failed: {power_error}");
                 }
                 work::latch_and_halt(&mut self.safety, error);
             }
@@ -221,7 +227,7 @@ impl Application {
         match outcome {
             DisplayOutcome::Failed(error) => {
                 self.schedule.defer_retry(completed_at, USB_INTERVAL_US);
-                log::error!("{source}: display FAILED: {error:?}; cleanup complete, NVS clean; continuing; next scheduled attempt in 60 s");
+                log::error!("{source}: display FAILED: {error}; cleanup complete, NVS clean; continuing; next scheduled attempt in 60 s");
             }
             DisplayOutcome::Displayed => {
                 self.schedule.refresh_succeeded(completed_at, manual);
@@ -242,7 +248,7 @@ impl Application {
             &mut self.schedule,
             percentage,
         ) {
-            log::error!("UploadWindow failed: {error:?}");
+            log::error!("UploadWindow failed: {error}");
             work::latch_and_halt(&mut self.safety, error);
         }
         if self.safety.state() == SafetyState::Working {

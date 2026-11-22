@@ -3,9 +3,11 @@
 use std::time::{Duration, Instant};
 
 use crate::gesture::{Gesture, GestureClassifier};
-use esp_idf_svc::hal::{
-    delay::FreeRtos,
-    gpio::{PinDriver, RtcInput},
+use esp_idf_svc::{
+    hal::{
+        delay::FreeRtos,
+        gpio::{PinDriver, RtcInput},
+    },
 };
 
 pub const POLL_MS: u32 = 5;
@@ -24,6 +26,7 @@ pub fn classify(button: &Button, wake_at: Instant) -> Gesture {
 }
 
 production_items! {
+    use esp_idf_svc::sys::EspError;
     use crate::gesture::BUTTON_DEBOUNCE;
 
     /// Wait for a stable release; a stuck button must not cause a wake loop.
@@ -49,8 +52,8 @@ production_items! {
         }
     }
 
-    /// Arm the remaining RTC deadline and enter deep sleep.
-    pub fn sleep(button: &Button) -> ! {
+    /// Arm the remaining RTC deadline and enter deep sleep; returns only if arming fails.
+    pub fn sleep(button: &Button) -> Result<!, EspError> {
         use crate::schedule::DAILY_INTERVAL_US;
         use esp_idf_svc::hal::sleep::{rtc::RtcWakeLevel, DeepSleep};
 
@@ -60,14 +63,9 @@ production_items! {
             .deadline_us(DAILY_INTERVAL_US)
             .saturating_sub(crate::rtc::now_us())
             .max(1_000_000);
-        let mut sleep = DeepSleep::new()
-            .expect("failed to reset deep-sleep wakeup sources")
-            .wakeup_on_timer(Duration::from_micros(remaining_us))
-            .expect("failed to configure RTC timer wake");
+        let mut sleep = DeepSleep::new()?.wakeup_on_timer(Duration::from_micros(remaining_us))?;
         if released {
-            sleep = sleep
-                .wakeup_on_rtc(button, RtcWakeLevel::AllLow)
-                .expect("failed to configure KEY0 wake");
+            sleep = sleep.wakeup_on_rtc(button, RtcWakeLevel::AllLow)?;
         }
         log::info!(
             "entering deep sleep; next refresh in {} s{}",

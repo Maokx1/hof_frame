@@ -13,7 +13,9 @@ fn main() {
     }
 }
 
+/// Report that host builds exist only for tests and cannot run the firmware.
 #[cfg(not(target_os = "espidf"))]
 fn main() {
-    panic!("firmware requires an ESP-IDF target");
+    eprintln!("firmware requires an ESP-IDF target");
+    std::process::exit(1);
 }

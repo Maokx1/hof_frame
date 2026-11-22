@@ -1,15 +1,59 @@
 use std::time::Instant;
 
-use crate::{frame, png_decode};
+use crate::{
+    frame::{self, FrameError},
+    png_decode::{self, DecodeError},
+};
 use esp_idf_svc::hal::delay::FreeRtos;
 
 use crate::frame_flash::FlashFrames;
-use crate::psram::PsramBuffer;
+use crate::partition::FlashError;
+use crate::psram::{PsramBuffer, PsramError};
+use crate::safety_nvs::NvsSafetyError;
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum PipelineError {
-    Rejected(Box<dyn std::error::Error>),
-    Fault(String),
+    /// The image cannot be decoded; another upload may be attempted.
+    #[error("{0}")]
+    Rejected(DecodeError),
+    /// A safety diagnostic boundary could not be committed.
+    #[error("{0}")]
+    Safety(#[from] NvsSafetyError),
+    /// The PSRAM candidate buffer could not be allocated.
+    #[error("{0}")]
+    Memory(#[from] PsramError),
+    /// The staged upload could not be read back from flash.
+    #[error("upload flash read failed: {0}")]
+    StagingRead(std::io::Error),
+    /// The frames partition could not be opened.
+    #[error("{0}")]
+    Flash(#[from] FlashError),
+    /// The decoded frame could not be committed.
+    #[error("frame commit failed: {0}")]
+    Commit(FrameError<FlashError>),
+    /// Stored frames could not be reloaded after the commit.
+    #[error("frame reload failed: {0}")]
+    Reload(FrameError<FlashError>),
+    /// Reloading storage did not select the newly committed frame.
+    #[error("committed frame was not selected on reload")]
+    NotSelected,
+}
+
+impl From<DecodeError> for PipelineError {
+    /// Separate staging-flash read faults from invalid image content.
+    fn from(error: DecodeError) -> Self {
+        match error {
+            DecodeError::Png(png::DecodingError::IoError(io))
+                if !matches!(
+                    io.kind(),
+                    std::io::ErrorKind::UnexpectedEof | std::io::ErrorKind::TimedOut
+                ) =>
+            {
+                Self::StagingRead(io)
+            }
+            error => Self::Rejected(error),
+        }
+    }
 }
 
 /// Decode into a bounded candidate, then publish and verify an inactive frame slot.
@@ -20,24 +64,21 @@ pub fn save(
     deadline: Instant,
     safety: &mut crate::safety::SafetyGuard<crate::safety_nvs::NvsSafetyStore>,
 ) -> Result<(), PipelineError> {
-    crate::work::set_phase(safety, crate::safety::WorkPhase::Decode)
-        .map_err(|error| PipelineError::Fault(error.to_string()))?;
+    crate::work::set_phase(safety, crate::safety::WorkPhase::Decode)?;
     log::info!(
         "Upload pipeline: decoding {} encoded bytes by rows; {metadata:?}; AP ON; panel OFF",
         encoded_len
     );
-    let mut packed = PsramBuffer::new(frame::FRAME_BYTES)
-        .map_err(|error| PipelineError::Fault(error.to_string()))?;
+    let mut packed = PsramBuffer::new(frame::FRAME_BYTES)?;
     log_decoder_heap();
     decode(encoded, encoded_len, metadata, packed.bytes_mut(), deadline)?;
     if Instant::now() >= deadline {
-        return Err(PipelineError::Rejected("commit deadline exceeded".into()));
+        return Err(PipelineError::Rejected(DecodeError::DeadlineExceeded));
     }
     log::info!(
         "Upload pipeline: conversion complete; committing 960000 packed bytes to inactive slot"
     );
-    crate::work::set_phase(safety, crate::safety::WorkPhase::Save)
-        .map_err(|error| PipelineError::Fault(error.to_string()))?;
+    crate::work::set_phase(safety, crate::safety::WorkPhase::Save)?;
     commit(packed.bytes_mut(), metadata, deadline)
 }
 
@@ -64,22 +105,12 @@ fn decode(
 ) -> Result<(), PipelineError> {
     png_decode::decode_reader(encoded, encoded_len, metadata, packed, || {
         if Instant::now() >= deadline {
-            return Err("decode/conversion deadline exceeded");
+            return Err(DecodeError::DeadlineExceeded);
         }
         FreeRtos::delay_ms(1);
         Ok(())
-    })
-    .map_err(|error| match error.downcast_ref::<png::DecodingError>() {
-        Some(png::DecodingError::IoError(io))
-            if !matches!(
-                io.kind(),
-                std::io::ErrorKind::UnexpectedEof | std::io::ErrorKind::TimedOut
-            ) =>
-        {
-            PipelineError::Fault(format!("upload flash read failed: {io}"))
-        }
-        _ => PipelineError::Rejected(error),
-    })
+    })?;
+    Ok(())
 }
 
 /// Publish a candidate only after readback and ensure reload selects that record.
@@ -88,19 +119,12 @@ fn commit(
     metadata: frame::Metadata,
     deadline: Instant,
 ) -> Result<(), PipelineError> {
-    let mut storage =
-        FlashFrames::open().map_err(|error| PipelineError::Fault(error.to_string()))?;
+    let mut storage = FlashFrames::open()?;
     storage.set_deadline(deadline);
-    let record = frame::commit(&mut storage, packed, metadata)
-        .map_err(|error| PipelineError::Fault(format!("frame commit failed: {error:?}")))?;
-    let selected = storage
-        .load()
-        .map_err(|error| PipelineError::Fault(format!("frame reload failed: {error:?}")))?
-        .current;
+    let record = frame::commit(&mut storage, packed, metadata).map_err(PipelineError::Commit)?;
+    let selected = storage.load().map_err(PipelineError::Reload)?.current;
     if selected != Some(record) {
-        return Err(PipelineError::Fault(
-            "committed frame was not selected on reload".into(),
-        ));
+        return Err(PipelineError::NotSelected);
     }
     log::info!(
         "Upload pipeline: SAVED {record:?}; dithered native frame; panel OFF; no display refresh"

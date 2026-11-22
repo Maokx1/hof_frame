@@ -1,32 +1,21 @@
 use std::marker::PhantomData;
-use std::ptr::NonNull;
 use std::time::Instant;
 
 use crate::frame::{self, FrameRecord, FrameStorage, Scan, STORAGE_BYTES};
+use crate::partition::{self, FlashError};
 use esp_idf_svc::hal::delay::FreeRtos;
-use esp_idf_svc::sys::{self, esp, EspError};
+use esp_idf_svc::sys::{self, esp};
 
 pub struct FlashFrames {
-    partition: NonNull<sys::esp_partition_t>,
+    partition: partition::Partition,
     operations: u8,
     deadline: Option<Instant>,
 }
 
 impl FlashFrames {
     /// Open only the expected two-slot frames partition.
-    pub fn open() -> Result<Self, EspError> {
-        let partition = unsafe {
-            sys::esp_partition_find_first(
-                sys::esp_partition_type_t_ESP_PARTITION_TYPE_DATA,
-                sys::esp_partition_subtype_t_ESP_PARTITION_SUBTYPE_DATA_UNDEFINED,
-                c"frames".as_ptr(),
-            )
-        };
-        let partition = NonNull::new(partition.cast_mut())
-            .ok_or_else(|| EspError::from(sys::ESP_ERR_NOT_FOUND).unwrap())?;
-        if unsafe { partition.as_ref().size } as usize != STORAGE_BYTES {
-            return Err(EspError::from(sys::ESP_ERR_INVALID_SIZE).unwrap());
-        }
+    pub fn open() -> Result<Self, FlashError> {
+        let partition = partition::find(c"frames", STORAGE_BYTES, |size| size == STORAGE_BYTES)?;
         Ok(Self {
             partition,
             operations: 0,
@@ -40,12 +29,12 @@ impl FlashFrames {
     }
 
     /// Reject operations that start after the configured deadline.
-    fn check_deadline(&self) -> Result<(), EspError> {
+    fn check_deadline(&self) -> Result<(), FlashError> {
         if self
             .deadline
             .is_some_and(|deadline| Instant::now() >= deadline)
         {
-            return Err(EspError::from(sys::ESP_ERR_TIMEOUT).unwrap());
+            return Err(FlashError::DeadlineExceeded);
         }
         Ok(())
     }
@@ -60,7 +49,7 @@ impl FlashFrames {
     }
 
     /// Scan both slots and log validation/fallback decisions.
-    pub fn load(&mut self) -> Result<Scan, frame::FrameError<EspError>> {
+    pub fn load(&mut self) -> Result<Scan, frame::FrameError<FlashError>> {
         let result = frame::scan(self)?;
         for (slot, status) in result.slots.iter().enumerate() {
             match status {
@@ -77,9 +66,9 @@ impl FlashFrames {
     }
 
     /// Borrow a validated payload read-only until the mapping is dropped.
-    pub fn map(&self, record: FrameRecord) -> Result<MappedFrame<'_>, EspError> {
+    pub fn map(&self, record: FrameRecord) -> Result<MappedFrame<'_>, FlashError> {
         if record.slot >= 2 {
-            return Err(EspError::from(sys::ESP_ERR_INVALID_ARG).unwrap());
+            return Err(FlashError::InvalidSlot(record.slot));
         }
         let mut pointer = std::ptr::null();
         let mut handle = 0;
@@ -102,10 +91,10 @@ impl FlashFrames {
 }
 
 impl FrameStorage for FlashFrames {
-    type Error = EspError;
+    type Error = FlashError;
 
     /// Read partition bytes under the storage deadline.
-    fn read(&mut self, offset: usize, bytes: &mut [u8]) -> Result<(), EspError> {
+    fn read(&mut self, offset: usize, bytes: &mut [u8]) -> Result<(), FlashError> {
         self.check_deadline()?;
         unsafe {
             esp!(sys::esp_partition_read(
@@ -120,7 +109,7 @@ impl FrameStorage for FlashFrames {
     }
 
     /// Erase one sector at a time, checking the deadline between sectors.
-    fn erase(&mut self, offset: usize, len: usize) -> Result<(), EspError> {
+    fn erase(&mut self, offset: usize, len: usize) -> Result<(), FlashError> {
         for sector in (offset..offset + len).step_by(4096) {
             self.check_deadline()?;
             unsafe {
@@ -136,7 +125,7 @@ impl FrameStorage for FlashFrames {
     }
 
     /// Write partition bytes and yield to the RTOS.
-    fn write(&mut self, offset: usize, bytes: &[u8]) -> Result<(), EspError> {
+    fn write(&mut self, offset: usize, bytes: &[u8]) -> Result<(), FlashError> {
         self.check_deadline()?;
         unsafe {
             esp!(sys::esp_partition_write(

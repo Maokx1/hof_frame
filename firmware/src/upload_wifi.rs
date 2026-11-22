@@ -8,6 +8,8 @@ use crate::{
     frame::Metadata,
     safety::WorkPhase,
     schedule::RefreshSchedule,
+    partition::FlashError,
+    safety_nvs::NvsSafetyError,
     upload::{self, BodyLength, ProgressEvent, ProgressStage, ReceiveError, Request},
     upload_flash::FlashUpload,
     work::{self, Guard},
@@ -25,7 +27,41 @@ pub const AP_ADDRESS: std::net::Ipv4Addr = std::net::Ipv4Addr::new(192, 168, 4, 
 pub const AP_HOSTNAME: &str = "bursztynki";
 type Wifi = BlockingWifi<EspWifi<'static>>;
 type Reader = BufReader<TimedStream>;
-type SessionResult<T> = Result<T, Box<dyn std::error::Error>>;
+type SessionResult<T> = Result<T, UploadError>;
+
+#[derive(Debug, thiserror::Error)]
+pub enum UploadError {
+    /// The build has no valid hotspot password.
+    #[error("upload requires HOF_WIFI_PASSWORD at build time: 8-63 ASCII characters")]
+    MissingPassword,
+    /// The SSID or password does not fit the Wi-Fi configuration.
+    #[error("hotspot SSID or password is too long")]
+    CredentialsTooLong,
+    /// The awake budget ran out before the hotspot started.
+    #[error("awake deadline expired before AP startup")]
+    DeadlineExpired,
+    /// The hotspot came up on an unexpected address.
+    #[error("AP address mismatch: expected {AP_ADDRESS}, got {0}")]
+    AddressMismatch(std::net::Ipv4Addr),
+    /// The upload staging partition is unavailable.
+    #[error("upload storage unavailable: {0}")]
+    StagingUnavailable(#[from] FlashError),
+    /// Writing the received body to staging flash failed.
+    #[error("upload staging failed: {0}")]
+    StagingWrite(io::Error),
+    /// Image processing failed in a way that blocks further work.
+    #[error("{0}")]
+    Processing(String),
+    /// A safety diagnostic boundary could not be committed.
+    #[error("{0}")]
+    Safety(#[from] NvsSafetyError),
+    /// A Wi-Fi, network-interface, or mDNS call failed.
+    #[error("Wi-Fi call failed: {0}")]
+    Esp(#[from] EspError),
+    /// A socket operation failed.
+    #[error("socket failed: {0}")]
+    Io(#[from] io::Error),
+}
 
 pub struct Received {
     pub buffer: FlashUpload,
@@ -33,13 +69,17 @@ pub struct Received {
     pub metadata: Metadata,
 }
 
+#[derive(Debug, thiserror::Error)]
 pub enum ProcessingError {
     /// The image was rejected and the upload window can accept another attempt.
+    #[error("{0}")]
     Retry(String),
     /// A safety or processing failure prevents further work.
+    #[error("{0}")]
     Fatal(String),
     /// The display refresh failed after cleanup, but USB operation can continue.
     #[cfg(feature = "usb")]
+    #[error("{0}")]
     DisplayFailed(String),
 }
 
@@ -59,7 +99,7 @@ struct Session<'a> {
 }
 
 /// Configure the fixed AP network without starting its radio.
-pub fn setup(modem: esp_idf_svc::hal::modem::Modem<'static>) -> Result<Wifi, EspError> {
+pub fn setup(modem: esp_idf_svc::hal::modem::Modem<'static>) -> Result<Wifi, UploadError> {
     use esp_idf_svc::{
         ipv4,
         netif::{EspNetif, NetifConfiguration, NetifStack},
@@ -70,7 +110,7 @@ pub fn setup(modem: esp_idf_svc::hal::modem::Modem<'static>) -> Result<Wifi, Esp
         ip_configuration: Some(ipv4::Configuration::Router(ipv4::RouterConfiguration {
             subnet: ipv4::Subnet {
                 gateway: AP_ADDRESS,
-                mask: "24".parse().expect("valid fixed subnet mask"),
+                mask: ipv4::Mask(24),
             },
             dhcp_enabled: true,
             dns: None,
@@ -89,20 +129,23 @@ pub fn setup(modem: esp_idf_svc::hal::modem::Modem<'static>) -> Result<Wifi, Esp
 }
 
 /// Validate build-time credentials and configure a one-client WPA2 hotspot.
-pub fn configure(wifi: &mut Wifi) -> Result<(), EspError> {
-    let password = PASSWORD.filter(|value| upload::valid_wifi_password(value))
-        .ok_or_else(|| {
-            log::error!("upload requires HOF_WIFI_PASSWORD at build time: 8-63 ASCII characters; never log or commit it");
-            EspError::from(esp_idf_svc::sys::ESP_ERR_INVALID_ARG).unwrap()
-        })?;
+pub fn configure(wifi: &mut Wifi) -> Result<(), UploadError> {
+    let password = PASSWORD
+        .filter(|value| upload::valid_wifi_password(value))
+        .ok_or(UploadError::MissingPassword)?;
     wifi.set_configuration(&Configuration::AccessPoint(AccessPointConfiguration {
-        ssid: "HOF-Frame".try_into().expect("SSID fits"),
-        password: password.try_into().expect("validated WPA2 password fits"),
+        ssid: "HOF-Frame"
+            .try_into()
+            .map_err(|_| UploadError::CredentialsTooLong)?,
+        password: password
+            .try_into()
+            .map_err(|_| UploadError::CredentialsTooLong)?,
         auth_method: AuthMethod::WPA2Personal,
         max_connections: 1,
         channel: 6,
         ..Default::default()
-    }))
+    }))?;
+    Ok(())
 }
 
 /// Serve a bounded window, always attempting radio cleanup after session exit.
@@ -128,11 +171,7 @@ fn serve(
 ) -> SessionResult<()> {
     work::set_phase(safety, WorkPhase::Upload)?;
     if Instant::now() >= awake_deadline {
-        return Err(io::Error::new(
-            io::ErrorKind::TimedOut,
-            "awake deadline expired before AP startup",
-        )
-        .into());
+        return Err(UploadError::DeadlineExpired);
     }
     let mut mdns = EspMdns::take()?;
     mdns.set_hostname(AP_HOSTNAME)?;
@@ -140,10 +179,7 @@ fn serve(
     wifi.wait_netif_up()?;
     let address = wifi.wifi().ap_netif().get_ip_info()?.ip;
     if address != AP_ADDRESS {
-        return Err(io::Error::other(format!(
-            "AP address mismatch: expected {AP_ADDRESS}, got {address}"
-        ))
-        .into());
+        return Err(UploadError::AddressMismatch(address));
     }
     let listener = TcpListener::bind(("0.0.0.0", 80))?;
     listener.set_nonblocking(true)?;
@@ -176,7 +212,7 @@ fn stop(wifi: &mut Wifi, safety: &mut Guard, result: SessionResult<()>) -> Sessi
     }
     match (result, stopped) {
         (Err(error), Err(stop_error)) => {
-            log::error!("UploadWindow: Wi-Fi shutdown also failed: {stop_error:?}");
+            log::error!("UploadWindow: Wi-Fi shutdown also failed: {stop_error}");
             Err(error)
         }
         (Err(error), Ok(())) => Err(error),
@@ -305,7 +341,7 @@ impl Session<'_> {
             Err(ReceiveError::Storage(error)) if error.kind() != io::ErrorKind::TimedOut => {
                 log::error!("UploadWindow: flash staging failed: {error}");
                 storage_unavailable(&mut reader.get_mut().stream, "Upload storage failed; saved frame unchanged. Further work is blocked; hotspot closing.");
-                return Err(error.into());
+                return Err(UploadError::StagingWrite(error));
             }
             Err(error) => {
                 log::warn!("UploadWindow: receive failed: {error:?}");
@@ -366,7 +402,7 @@ impl Session<'_> {
                     "{message} Further work is blocked; hotspot closing."
                 )));
                 result_grace();
-                Err(message.into())
+                Err(UploadError::Processing(message))
             }
         }
     }

@@ -1,6 +1,6 @@
 //! One production wake cycle, followed by real deep sleep.
 
-use super::State;
+use super::{AppError, State};
 use crate::{
     battery::BatterySensor,
     buttons::{self, Button},
@@ -38,16 +38,20 @@ struct UploadHardware {
 }
 
 impl Application {
-    /// Read the wake gesture and recovery records before deciding whether work is safe.
+    /// Boot the production wake, halting with a logged fault if setup fails.
     pub fn boot() -> Self {
         let wake_at = Instant::now();
         super::initialize_runtime();
-        let peripherals = Peripherals::take().expect("peripherals already taken");
-        let button = PinDriver::rtc_input(peripherals.pins.gpio2, Pull::Up)
-            .expect("failed to configure KEY0/GPIO2 as an RTC input");
+        work::require(Self::try_boot(wake_at))
+    }
+
+    /// Read the wake gesture and recovery records before deciding whether work is safe.
+    fn try_boot(wake_at: Instant) -> Result<Self, AppError> {
+        let peripherals = Peripherals::take()?;
+        let button = PinDriver::rtc_input(peripherals.pins.gpio2, Pull::Up)?;
         let reset = ResetReason::get();
         let wake = WakeupReason::get();
-        work::require(Epd::disable_panel_power());
+        Epd::disable_panel_power()?;
         let gesture = if reset == ResetReason::DeepSleep && wake == WakeupReason::Button {
             Some(buttons::classify(&button, wake_at))
         } else {
@@ -55,10 +59,7 @@ impl Application {
         };
         let now_us = rtc::now_us();
         rtc::initialize(now_us);
-        let safety = work::require(safety_nvs::open(
-            "hof_safety",
-            reset == ResetReason::Brownout,
-        ));
+        let safety = safety_nvs::open("hof_safety", reset == ResetReason::Brownout)?;
         if safety.state() != SafetyState::Clean {
             log::error!("persistent safety latch set; refresh/upload blocked; battery recovery measurement is not implemented, so acknowledgement is unavailable");
             rtc::update(|state| state.schedule.defer_retry(now_us, DAILY_INTERVAL_US));
@@ -73,14 +74,14 @@ impl Application {
             adc: peripherals.adc1,
             battery_pin: peripherals.pins.gpio8,
         };
-        Self {
+        Ok(Self {
             button,
             upload_hardware: Some(upload_hardware),
             safety,
             wake_at,
             gesture,
             interrupted,
-        }
+        })
     }
 
     /// Production starts by selecting work for this wake.
@@ -100,9 +101,15 @@ impl Application {
                 self.refresh(manual);
                 State::PrepareSleep
             }
-            State::PrepareSleep => buttons::sleep(&self.button),
-            State::Idle | State::Classify(_) => unreachable!("USB-only state in production"),
+            State::PrepareSleep => self.sleep(),
         }
+    }
+
+    /// Enter deep sleep; halting is the only safe response if wake sources cannot be armed.
+    fn sleep(&self) -> State {
+        let Err(error) = buttons::sleep(&self.button);
+        log::error!("deep sleep could not be armed: {error}");
+        work::halt(error)
     }
 
     /// Translate the pure work decision into a production state and diagnostic log.
@@ -152,27 +159,7 @@ impl Application {
     /// Run a bounded upload session, retaining success inside the pipeline.
     fn upload(&mut self, wake_at: Instant) {
         log::warn!("normal upload: REAL display and deep sleep; battery voltage guard is NOT qualified; stable bench power only");
-        let hardware = self
-            .upload_hardware
-            .take()
-            .expect("upload peripherals available");
-        let mut sensor = BatterySensor::try_new(hardware.adc, hardware.battery_pin);
-        let percentage = BatterySensor::read_optional(sensor.as_mut());
-        self.begin_work();
-        let mut schedule = rtc::retained().schedule;
-        let result = (|| -> Result<(), Box<dyn std::error::Error>> {
-            work::set_phase(&mut self.safety, WorkPhase::Setup)?;
-            psram::verify()?;
-            let mut wifi = upload_wifi::setup(hardware.modem)?;
-            upload_wifi::run(
-                &mut wifi,
-                wake_at,
-                &mut self.safety,
-                &mut schedule,
-                percentage,
-            )
-        })();
-        match result {
+        match self.run_upload(wake_at) {
             Ok(()) => {
                 work::finish(&mut self.safety);
                 rtc::update(|state| state.refresh_in_progress = 0);
@@ -182,6 +169,23 @@ impl Application {
                 self.record_failure(true);
             }
         }
+    }
+
+    /// Read the battery, mark work, then verify hardware and serve the upload window.
+    fn run_upload(&mut self, wake_at: Instant) -> Result<(), AppError> {
+        let hardware = self
+            .upload_hardware
+            .take()
+            .ok_or(AppError::UploadHardwareUsed)?;
+        let mut sensor = BatterySensor::try_new(hardware.adc, hardware.battery_pin);
+        let percentage = BatterySensor::read_optional(sensor.as_mut());
+        self.begin_work();
+        let mut schedule = rtc::retained().schedule;
+        work::set_phase(&mut self.safety, WorkPhase::Setup)?;
+        psram::verify()?;
+        let mut wifi = upload_wifi::setup(hardware.modem)?;
+        upload_wifi::run(&mut wifi, wake_at, &mut self.safety, &mut schedule, percentage)?;
+        Ok(())
     }
 
     /// Refresh with Wi-Fi off and retain completion only after durable cleanup.
@@ -197,7 +201,7 @@ impl Application {
                 });
             }
             Err(error) => {
-                log::error!("display refresh failed: {error:?}");
+                log::error!("display refresh failed: {error}");
                 self.record_failure(false);
             }
         }

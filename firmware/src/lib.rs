@@ -35,6 +35,7 @@ espidf_items! {
     mod epd;
     mod frame_flash;
     mod image_decode;
+    mod partition;
     mod pipeline;
     mod psram;
     mod rtc;

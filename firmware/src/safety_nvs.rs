@@ -7,21 +7,30 @@ use esp_idf_svc::sys::EspError;
 
 pub struct NvsSafetyStore(EspDefaultNvs);
 
+#[derive(Debug, thiserror::Error)]
+pub enum NvsError {
+    /// An ESP-IDF NVS call failed.
+    #[error("NVS call failed: {0}")]
+    Esp(#[from] EspError),
+    /// A stored diagnostic record has an unsupported encoding.
+    #[error("invalid safety diagnostic record {0:#010x}")]
+    InvalidDiagnostic(u32),
+}
+
+/// Safety errors produced by the NVS-backed store.
+pub type NvsSafetyError = SafetyError<NvsError>;
+
 impl NvsSafetyStore {
     /// Load diagnostics, rejecting unsupported records instead of hiding them.
-    fn diagnostic(&self) -> Result<Option<Diagnostic>, EspError> {
-        let value = self.0.get_u32("diag_v1")?;
-        match value {
-            None => Ok(None),
-            Some(value) => Diagnostic::from_record(value).map(Some).ok_or_else(|| {
-                log::error!("safety diagnostics: invalid record {value:#010x}; work blocked");
-                EspError::from(esp_idf_svc::sys::ESP_ERR_INVALID_STATE).unwrap()
-            }),
-        }
+    fn diagnostic(&self) -> Result<Option<Diagnostic>, NvsError> {
+        self.0
+            .get_u32("diag_v1")?
+            .map(decode_diagnostic)
+            .transpose()
     }
 
     /// Record a fault at the last phase and preserve it as historical evidence.
-    fn fault(&mut self, reason: FaultReason) -> Result<(), EspError> {
+    fn fault(&mut self, reason: FaultReason) -> Result<(), NvsError> {
         let previous = self.diagnostic()?;
         let diagnostic = Diagnostic {
             phase: previous.map_or(WorkPhase::Unknown, |value| value.phase),
@@ -39,7 +48,7 @@ impl NvsSafetyStore {
 
 impl DiagnosticStore for NvsSafetyStore {
     /// Commit the current phase without altering safety permission.
-    fn phase(&mut self, phase: WorkPhase) -> Result<(), EspError> {
+    fn phase(&mut self, phase: WorkPhase) -> Result<(), NvsError> {
         let diagnostic = Diagnostic {
             phase,
             reason: FaultReason::None,
@@ -51,10 +60,10 @@ impl DiagnosticStore for NvsSafetyStore {
 }
 
 impl SafetyStore for NvsSafetyStore {
-    type Error = EspError;
+    type Error = NvsError;
 
     /// Read and log the authoritative compatible safety byte.
-    fn read(&mut self) -> Result<Option<u8>, EspError> {
+    fn read(&mut self) -> Result<Option<u8>, NvsError> {
         let value = self.0.get_u8("state_v1")?;
         match value {
             None => log::info!("safety NVS: no state_v1 record; establishing first-use Clean"),
@@ -69,7 +78,7 @@ impl SafetyStore for NvsSafetyStore {
     }
 
     /// Commit safety state, recording a runtime fault before a new latch.
-    fn write(&mut self, value: u8) -> Result<(), EspError> {
+    fn write(&mut self, value: u8) -> Result<(), NvsError> {
         if value == 0xA2 {
             let diagnostic = self.diagnostic()?;
             if diagnostic.is_none_or(|value| value.reason == FaultReason::None) {
@@ -82,11 +91,16 @@ impl SafetyStore for NvsSafetyStore {
     }
 }
 
+/// Decode a stored diagnostic record, rejecting unsupported encodings.
+fn decode_diagnostic(value: u32) -> Result<Diagnostic, NvsError> {
+    Diagnostic::from_record(value).ok_or(NvsError::InvalidDiagnostic(value))
+}
+
 /// Open production recovery without automatic partition erasure or acknowledgement.
 pub fn open(
     namespace: &str,
     brownout: bool,
-) -> Result<SafetyGuard<NvsSafetyStore>, SafetyError<EspError>> {
+) -> Result<SafetyGuard<NvsSafetyStore>, NvsSafetyError> {
     open_store(namespace, brownout, false)
 }
 
@@ -94,7 +108,7 @@ usb_items! {
     /// Start a fresh development session in the isolated USB namespace.
     pub fn open_usb_session(
         brownout: bool,
-    ) -> Result<SafetyGuard<NvsSafetyStore>, SafetyError<EspError>> {
+    ) -> Result<SafetyGuard<NvsSafetyStore>, NvsSafetyError> {
         open_store("hof_usb", brownout, true)
     }
 
@@ -119,24 +133,22 @@ fn open_store(
     namespace: &str,
     brownout: bool,
     reset_usb_session: bool,
-) -> Result<SafetyGuard<NvsSafetyStore>, SafetyError<EspError>> {
+) -> Result<SafetyGuard<NvsSafetyStore>, NvsSafetyError> {
     log::info!("safety NVS: opening namespace={namespace}; current reset brownout={brownout}");
     // Never erase a full/incompatible partition containing recovery metadata.
-    let partition = EspDefaultNvsPartition::take_with(false).map_err(SafetyError::Storage)?;
-    let nvs = EspDefaultNvs::new(partition, namespace, true).map_err(SafetyError::Storage)?;
+    let storage = |error: EspError| SafetyError::Storage(NvsError::Esp(error));
+    let partition = EspDefaultNvsPartition::take_with(false).map_err(storage)?;
+    let nvs = EspDefaultNvs::new(partition, namespace, true).map_err(storage)?;
     let mut store = NvsSafetyStore(nvs);
     let previous_state = store.read().map_err(SafetyError::Storage)?;
     let previous_diagnostic = store.diagnostic().map_err(SafetyError::Storage)?;
     log::info!(
         "safety diagnostics: previous state={previous_state:?}, work={previous_diagnostic:?}"
     );
-    match store.0.get_u32("last_fault_v1").map_err(SafetyError::Storage)? {
+    match store.0.get_u32("last_fault_v1").map_err(storage)? {
         None => log::info!("safety diagnostics: no recorded historical fault (legacy causes cannot be reconstructed)"),
         Some(value) => {
-            let diagnostic = Diagnostic::from_record(value).ok_or_else(|| {
-                log::error!("safety diagnostics: invalid historical fault {value:#010x}");
-                SafetyError::Storage(EspError::from(esp_idf_svc::sys::ESP_ERR_INVALID_STATE).unwrap())
-            })?;
+            let diagnostic = decode_diagnostic(value).map_err(SafetyError::Storage)?;
             log::warn!("safety diagnostics: last recorded fault={diagnostic:?}; no wall-clock timestamp");
         }
     }

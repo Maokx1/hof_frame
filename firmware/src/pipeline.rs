@@ -18,8 +18,8 @@ fn save(received: Received, deadline: Instant, safety: &mut Guard) -> Result<(),
         image_decode::PipelineError::Rejected(error) => ProcessingError::Retry(format!(
             "Image could not be decoded: {error}. Saved picture and display are unchanged. Choose another image and retry."
         )),
-        image_decode::PipelineError::Fault(error) => ProcessingError::Fatal(format!(
-            "Image save failed: {error}. Display was not refreshed."
+        fault => ProcessingError::Fatal(format!(
+            "Image save failed: {fault}. Display was not refreshed."
         )),
     })
 }
@@ -28,7 +28,7 @@ fn save(received: Received, deadline: Instant, safety: &mut Guard) -> Result<(),
 fn refresh(safety: &mut Guard) -> Result<DisplayOutcome, ProcessingError> {
     display::refresh_saved(safety).map_err(|error| {
         if let Err(power_error) = Epd::disable_panel_power() {
-            log::error!("display: emergency panel power cutoff failed: {power_error:?}");
+            log::error!("display: emergency panel power cutoff failed: {power_error}");
             return ProcessingError::Fatal(format!(
                 "Image saved, but display refresh failed: {error}. Emergency panel power cutoff also failed: {power_error}. Disconnect power."
             ));
@@ -46,7 +46,7 @@ fn finish(safety: &mut Guard) -> Result<(), ProcessingError> {
     })?;
     safety.finish_work().map_err(|error| {
         ProcessingError::Fatal(format!(
-            "Image processing completed but safety cleanup failed: {error:?}."
+            "Image processing completed but safety cleanup failed: {error}."
         ))
     })
 }

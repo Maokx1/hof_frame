@@ -1,14 +1,40 @@
 use std::io::{BufRead, Cursor, Seek};
 
-use crate::{conversion, frame};
+use crate::conversion::{self, ConversionError};
+use crate::frame;
+
+#[derive(Debug, thiserror::Error)]
+pub enum DecodeError {
+    /// The encoded input or output buffer exceeds the fixed image budget.
+    #[error("encoded image or packed buffer exceeds the image budget")]
+    OverBudget,
+    /// The caller's deadline expired between decoding steps.
+    #[error("decode/conversion deadline exceeded")]
+    DeadlineExceeded,
+    /// The PNG stream is malformed or could not be read.
+    #[error("{0}")]
+    Png(#[from] png::DecodingError),
+    /// The PNG is interlaced, animated, or not at the selected display resolution.
+    #[error("requires a non-interlaced, static PNG at the selected display resolution; use the upload page to resize PNG/JPEG")]
+    UnsupportedLayout,
+    /// The PNG decodes to a bit depth other than eight.
+    #[error("unsupported PNG output bit depth")]
+    UnsupportedBitDepth,
+    /// The PNG ended before every display row was decoded.
+    #[error("truncated PNG rows")]
+    TruncatedRows,
+    /// A decoded row could not be converted into panel pixels.
+    #[error("{0}")]
+    Conversion(#[from] ConversionError),
+}
 
 /// Decode an in-memory PNG using the same bounded row pipeline as flash input.
 pub fn decode(
     encoded: &[u8],
     metadata: frame::Metadata,
     packed: &mut [u8],
-    checkpoint: impl FnMut() -> Result<(), &'static str>,
-) -> Result<(), Box<dyn std::error::Error>> {
+    checkpoint: impl FnMut() -> Result<(), DecodeError>,
+) -> Result<(), DecodeError> {
     decode_reader(
         Cursor::new(encoded),
         encoded.len(),
@@ -24,10 +50,10 @@ pub fn decode_reader(
     encoded_len: usize,
     metadata: frame::Metadata,
     packed: &mut [u8],
-    mut checkpoint: impl FnMut() -> Result<(), &'static str>,
-) -> Result<(), Box<dyn std::error::Error>> {
+    mut checkpoint: impl FnMut() -> Result<(), DecodeError>,
+) -> Result<(), DecodeError> {
     if encoded_len > crate::upload::MAX_UPLOAD_BYTES || packed.len() != frame::FRAME_BYTES {
-        return Err("encoded image or packed buffer exceeds the image budget".into());
+        return Err(DecodeError::OverBudget);
     }
     checkpoint()?;
     let mut decoder = png::Decoder::new(encoded);
@@ -42,17 +68,17 @@ pub fn decode_reader(
         || info.interlaced
         || info.animation_control.is_some()
     {
-        return Err("requires a non-interlaced, static PNG at the selected display resolution; use the upload page to resize PNG/JPEG".into());
+        return Err(DecodeError::UnsupportedLayout);
     }
     let (color, depth) = reader.output_color_type();
     if depth != png::BitDepth::Eight {
-        return Err("unsupported PNG output bit depth".into());
+        return Err(DecodeError::UnsupportedBitDepth);
     }
     for y in 0..expected.1 {
         if y % 16 == 0 {
             checkpoint()?;
         }
-        let row = reader.next_row()?.ok_or("truncated PNG rows")?;
+        let row = reader.next_row()?.ok_or(DecodeError::TruncatedRows)?;
         conversion::row(packed, metadata.orientation, y, row.data(), color.samples())?;
     }
     reader.finish()?;
