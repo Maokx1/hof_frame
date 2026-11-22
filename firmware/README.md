@@ -420,6 +420,86 @@ pyftsubset /usr/share/fonts/truetype/dejavu/DejaVuSans.ttf \
   --name-IDs='*' --name-legacy --name-languages='*'
 ```
 
+## Developer workflow
+
+Run the commands below from the `firmware` directory. Embedded builds require
+the `esp` Rust toolchain installed with `espup`, `~/export-esp.sh` sourced, and
+`ldproxy`, `espflash`, CMake, Ninja, Git, and Python 3 available. Configure the
+[hotspot password](#set-the-hotspot-password-once) before running the firmware.
+
+Before embedded builds, leave any active Python virtual environment (for
+example, run `deactivate` in the terminal that activated the wiring project's
+`.venv`) or use a terminal without Python environment auto-activation.
+ESP-IDF creates its own Python environment during SDK setup. Simply unsetting
+`VIRTUAL_ENV` is insufficient: `python3` must resolve to a base interpreter.
+The check below reports this before starting embedded builds. Host tests and
+coverage do not require leaving the Python virtual environment.
+
+### Run on the board
+
+Choose one command to build and flash the firmware, then start the serial
+monitor:
+
+```sh
+cd firmware
+python3 -c 'import sys; assert sys.prefix == sys.base_prefix, "Leave the Python virtual environment before building ESP-IDF"'
+# Production mode:
+cargo --config .cargo/wifi.local.toml run --release
+# USB development mode (alternative):
+cargo --config .cargo/wifi.local.toml run --release --features usb
+```
+
+To build without flashing, replace `run` with `build`.
+
+### Test on the host
+
+```sh
+cd firmware
+cargo +stable test --tests --all-features --target x86_64-unknown-linux-gnu
+```
+
+Firmware integration tests live in [tests](tests) as `test_<module>.rs`.
+Cargo discovers each file automatically; tests access the library's public API.
+Use your host target triple instead of `x86_64-unknown-linux-gnu` on other platforms.
+Do not use plain `cargo test`: the default ESP32-S3 target flashes the test
+executable to the board. If that happens, stop the monitor with Ctrl+C and
+restore the application using a run command above.
+
+### Test with coverage
+
+Install `cargo-llvm-cov` and the stable toolchain's LLVM tools once:
+
+```sh
+cargo install cargo-llvm-cov
+rustup component add llvm-tools-preview --toolchain stable
+```
+
+Run the host tests with coverage and open the HTML report:
+
+```sh
+cd firmware
+cargo +stable llvm-cov --tests --all-features --target x86_64-unknown-linux-gnu --html --open
+```
+
+The stable toolchain and host target are needed because the project's default
+`esp` toolchain is custom and its tests would target the board. The report
+covers host-testable code, not ESP-IDF-specific hardware code.
+
+### Lint and format
+
+Run host Clippy with the same options as CI, then check both embedded modes:
+
+```sh
+cd firmware
+cargo +stable clippy --lib --tests --all-features --target x86_64-unknown-linux-gnu -- -D warnings
+cargo clippy -- -D warnings
+cargo clippy --features usb -- -D warnings
+cargo fmt --all -- --check
+```
+
+CI workflows live in the repository-root [.github/workflows](../.github/workflows).
+See [STATE_MACHINE.md](STATE_MACHINE.md) for target contracts and battery work.
+
 ## Validation and acceptance
 
 The upload page is Polish-first, with a self-contained dark/amber layout.
@@ -443,42 +523,6 @@ accordingly; success starts the six-second shutdown countdown, and retry uses
 the remaining time reported by the board. Screen readers receive time warnings
 at 60, 30, and 10 seconds rather than announcements on every timer tick.
 
-Before embedded builds, leave any active Python virtual environment (for
-example, run `deactivate` in the terminal that activated the wiring project's
-`.venv`) or use a terminal without Python environment auto-activation.
-ESP-IDF creates its own Python environment during SDK setup. Using a virtual
-environment's interpreter can fail with
-`This script was called from a virtual environment, can not create a virtual environment again`.
-Simply unsetting `VIRTUAL_ENV` is insufficient: `python3` must resolve to a base
-interpreter. The check below reports this before starting the embedded builds.
-Host Rust tests do not require leaving the Python virtual environment.
-
-Do not use plain `cargo test`: the default target is the ESP32-S3, and its
-runner flashes the unit-test executable onto the board and starts the serial
-monitor. These tests are intended to run on the host, not under the board's
-watchdog and thread constraints. Always specify the host target as below.
-If you have flashed the test executable, stop the monitor with Ctrl+C and
-restore the application with `cargo --config .cargo/wifi.local.toml run --release`
-(add `--features usb` for
-USB testing), using your normal ESP-IDF environment and build-time password.
-
-```sh
-cd firmware
-cargo +stable test --tests --target x86_64-unknown-linux-gnu
-python3 -c 'import sys; assert sys.prefix == sys.base_prefix, "Leave the Python virtual environment before building ESP-IDF"'
-cargo --config .cargo/wifi.local.toml build --release
-cargo --config .cargo/wifi.local.toml build --release --features usb
-cargo fmt -- --check
-```
-
-Firmware integration tests live in [tests](tests) as `test_<module>.rs`.
-Cargo discovers each file automatically; tests access the library's public API.
-Use your host target triple instead of `x86_64-unknown-linux-gnu` on other platforms.
-The host binary reports that firmware requires ESP-IDF if run; ESP-IDF
-dependencies and build setup apply only to the embedded target.
-CI workflows live in the repository-root [.github/workflows](../.github/workflows)
-and run host tests as well as embedded checks.
-
 Host tests exercise the actual library without ESP-IDF dependencies: gestures,
 KEY1 debounce, scheduling, safety, atomic storage/torn writes, decoder, overlay,
 and HTTP progress framing. They do not replace hardware acceptance.
@@ -495,7 +539,3 @@ panel faults, and battery operation remain unqualified.
 The historical production latch remains unexplained: `hof_safety` was already
 `0xA2` at boot with current-reset brownout false. There are no earlier logs to
 establish its original cause. This migration preserves it, not silently clears it.
-
-Tooling: install the `esp` Rust toolchain with `espup`, source `~/export-esp.sh`,
-and have `ldproxy`, `espflash`, CMake, Ninja, Git, and Python 3 available.
-See [STATE_MACHINE.md](STATE_MACHINE.md) for target contracts and battery work.
