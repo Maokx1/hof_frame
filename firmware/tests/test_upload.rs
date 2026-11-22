@@ -163,16 +163,21 @@ fn exact_seven_mb_is_accepted_but_one_more_is_rejected() {
 
 #[test]
 fn streams_seven_mb_in_small_writes_and_reports_storage_failures() {
-    struct Sink {
+    struct Sink<'a> {
+        expected: &'a [u8],
         written: usize,
         fail: bool,
     }
-    impl Write for Sink {
+    impl Write for Sink<'_> {
         fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
             assert!(bytes.len() <= 4096);
             if self.fail {
                 return Err(io::Error::other("flash write failed"));
             }
+            assert_eq!(
+                bytes,
+                &self.expected[self.written..self.written + bytes.len()]
+            );
             self.written += bytes.len();
             Ok(bytes.len())
         }
@@ -180,26 +185,30 @@ fn streams_seven_mb_in_small_writes_and_reports_storage_failures() {
             Ok(())
         }
     }
+    let bytes: Vec<u8> = (0..MAX_UPLOAD_BYTES)
+        .map(|index| ((index * 73) ^ (index >> 8) ^ (index >> 16)) as u8)
+        .collect();
     let mut sink = Sink {
+        expected: &bytes,
         written: 0,
         fail: false,
     };
-    for body in [BodyLength::Known(MAX_UPLOAD_BYTES), BodyLength::Chunked] {
-        let bytes = vec![0x55; MAX_UPLOAD_BYTES];
+    for chunk_size in [None, Some(3001), Some(MAX_UPLOAD_BYTES)] {
         let mut encoded = Vec::new();
-        if body == BodyLength::Chunked {
-            for chunk in bytes.chunks(3001) {
+        let (body, input) = if let Some(chunk_size) = chunk_size {
+            for chunk in bytes.chunks(chunk_size) {
                 write!(encoded, "{:x}\r\n", chunk.len()).unwrap();
                 encoded.extend_from_slice(chunk);
                 encoded.extend_from_slice(b"\r\n");
             }
             encoded.extend_from_slice(b"0\r\n\r\n");
+            (BodyLength::Chunked, encoded.as_slice())
         } else {
-            encoded = bytes;
-        }
+            (BodyLength::Known(bytes.len()), bytes.as_slice())
+        };
         sink.written = 0;
         assert_eq!(
-            receive_to(&mut Cursor::new(encoded), body, &mut sink, usize::MAX).unwrap(),
+            receive_to(&mut Cursor::new(input), body, &mut sink, usize::MAX).unwrap(),
             7_000_000
         );
         assert_eq!(sink.written, 7_000_000);
@@ -344,6 +353,30 @@ fn chunk_framing_limits_and_size_overflow_fail_without_writing() {
         Err(ReceiveError::TooLarge)
     ));
     assert!(destination.is_empty());
+}
+
+#[test]
+fn chunk_header_budget_is_cumulative_and_inclusive() {
+    let chunk = format!("1;{}\r\nx\r\n", "e".repeat(60));
+    for (first_extension, accepted) in [(121, true), (122, false)] {
+        // The headers total exactly 128 KiB for the first case.
+        let mut input = format!("1;{}\r\nx\r\n", "e".repeat(first_extension));
+        input.push_str(&chunk.repeat(2046));
+        input.push_str("0\r\n\r\n");
+        let mut destination = Vec::new();
+        let result = receive_to(
+            &mut Cursor::new(input),
+            BodyLength::Chunked,
+            &mut destination,
+            MAX_UPLOAD_BYTES,
+        );
+        if accepted {
+            assert_eq!(result.unwrap(), 2047);
+        } else {
+            assert!(matches!(result, Err(ReceiveError::InvalidRequest)));
+        }
+        assert_eq!(destination, vec![b'x'; 2047]);
+    }
 }
 
 fn headers(extra: &str) -> Vec<u8> {

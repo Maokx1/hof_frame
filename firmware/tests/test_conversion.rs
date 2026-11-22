@@ -2,72 +2,134 @@ use firmware::conversion::*;
 use firmware::frame::{self, Orientation, FRAME_BYTES};
 
 #[test]
-fn spectra6_palette_uses_ed2208_native_codes() {
-    assert_eq!(
-        PALETTE,
-        [
-            (0, [0, 0, 0]),
-            (1, [255, 255, 255]),
-            (2, [255, 255, 0]),
-            (3, [255, 0, 0]),
-            (5, [0, 0, 255]),
-            (6, [0, 255, 0]),
-        ]
-    );
+fn converts_known_colors_to_packed_pixels_in_both_orientations() {
+    let (native_width, native_height) = (800, 480);
+    let colors = [
+        ([0, 0, 0], 0),
+        ([255, 255, 255], 1),
+        ([255, 255, 0], 2),
+        ([255, 0, 0], 3),
+        ([0, 0, 255], 5),
+        ([0, 255, 0], 6),
+    ];
+    for (orientation, width, height) in [
+        (Orientation::Landscape, native_width, native_height),
+        (Orientation::Portrait, native_height, native_width),
+    ] {
+        assert_eq!(dimensions(orientation), (width, height));
+        let y = height / 3;
+        let pixels: Vec<u8> = (0..width)
+            .flat_map(|x| colors[x % colors.len()].0)
+            .collect();
+        let mut output = vec![0x44; FRAME_BYTES];
+        row(&mut output, orientation, y, &pixels, 3).unwrap();
+
+        for x in 0..width {
+            let (native_x, native_y) = match orientation {
+                Orientation::Landscape => (x, y),
+                Orientation::Portrait => (native_width - 1 - y, x),
+            };
+            let index = native_y * native_width + native_x;
+            let byte = output[index / 2];
+            let actual = if index.is_multiple_of(2) {
+                byte >> 4
+            } else {
+                byte & 15
+            };
+            assert_eq!(actual, colors[x % colors.len()].1, "{orientation:?} x={x}");
+        }
+        let (neighbor_x, neighbor_y) = match orientation {
+            Orientation::Landscape => (0, y - 1),
+            Orientation::Portrait => (native_width - y, 0),
+        };
+        assert_eq!(frame::pixel(&output, neighbor_x, neighbor_y), Some(4));
+    }
 }
 
 #[test]
-fn white_and_transparency_stay_white() {
-    for orientation in [Orientation::Portrait, Orientation::Landscape] {
-        let (width, height) = dimensions(orientation);
-        let mut output = vec![0; FRAME_BYTES];
+fn transparent_pixels_become_white_and_opaque_pixels_keep_their_color() {
+    for (transparent, opaque, expected) in [
+        (&[0, 0][..], &[0, 255][..], 0x10),
+        (&[255, 0, 0, 0][..], &[255, 0, 0, 255][..], 0x13),
+    ] {
+        let mut pixels = Vec::new();
+        for _ in 0..frame::WIDTH / 2 {
+            pixels.extend_from_slice(transparent);
+            pixels.extend_from_slice(opaque);
+        }
+        let mut output = vec![0x66; FRAME_BYTES];
+        row(
+            &mut output,
+            Orientation::Landscape,
+            0,
+            &pixels,
+            transparent.len(),
+        )
+        .unwrap();
+        assert!(output[..frame::WIDTH / 2]
+            .iter()
+            .all(|byte| *byte == expected));
+        assert!(output[frame::WIDTH / 2..].iter().all(|byte| *byte == 0x66));
+    }
+}
+
+#[test]
+fn fully_transparent_image_is_white_in_both_orientations() {
+    for (orientation, width, height) in [
+        (Orientation::Landscape, 800, 480),
+        (Orientation::Portrait, 480, 800),
+    ] {
         let pixels = vec![0; width * 4];
+        let mut output = vec![0; FRAME_BYTES];
         for y in 0..height {
             row(&mut output, orientation, y, &pixels, 4).unwrap();
         }
-        assert!(output.iter().all(|byte| *byte == 0x11));
+        assert!(output.iter().all(|byte| *byte == 0x11), "{orientation:?}");
     }
 }
 
 #[test]
-fn palette_and_rotation_are_preserved() {
-    for orientation in [Orientation::Portrait, Orientation::Landscape] {
-        let (width, _) = dimensions(orientation);
-        for (code, rgb) in PALETTE {
-            let pixels: Vec<u8> = rgb
-                .iter()
-                .map(|v| *v as u8)
-                .cycle()
-                .take(width * 3)
-                .collect();
-            let mut output = vec![0x11; FRAME_BYTES];
-            row(&mut output, orientation, 0, &pixels, 3).unwrap();
-            for x in 0..width {
-                let (nx, ny) = frame::native_coordinates(orientation, x, 0).unwrap();
-                let index = ny * frame::WIDTH + nx;
-                let actual = if index % 2 == 0 {
-                    output[index / 2] >> 4
-                } else {
-                    output[index / 2] & 15
-                };
-                assert_eq!(actual, code);
+fn partially_transparent_black_is_composited_over_white() {
+    for pixel in [&[0, 128][..], &[0, 0, 0, 128][..]] {
+        let mut output = vec![0; FRAME_BYTES];
+        row(
+            &mut output,
+            Orientation::Landscape,
+            0,
+            &pixel.repeat(frame::WIDTH),
+            pixel.len(),
+        )
+        .unwrap();
+        assert_eq!(&output[..4], &[0x01; 4]);
+    }
+}
+
+#[test]
+fn grayscale_dithering_depends_on_pixel_position_and_brightness() {
+    for (gray, expected_rows) in [
+        (
+            110,
+            [[0x00, 0x01], [0x10, 0x10], [0x01, 0x00], [0x10, 0x10]],
+        ),
+        (
+            160,
+            [[0x01, 0x01], [0x11, 0x11], [0x01, 0x01], [0x11, 0x11]],
+        ),
+    ] {
+        let pixels = vec![gray; frame::WIDTH];
+        let mut output = vec![0; FRAME_BYTES];
+        for (y, expected) in expected_rows.iter().enumerate() {
+            row(&mut output, Orientation::Landscape, y, &pixels, 1).unwrap();
+            let start = y * frame::WIDTH / 2;
+            for (byte_index, byte) in output[start..start + frame::WIDTH / 2].iter().enumerate() {
+                assert_eq!(
+                    *byte,
+                    expected[byte_index % 2],
+                    "gray={gray}, y={y}, byte={byte_index}"
+                );
             }
-            assert!(frame::valid_pixels(&output));
         }
     }
-}
-
-#[test]
-fn dithered_gray_contains_multiple_colors_and_bad_rows_fail() {
-    let mut output = vec![0; FRAME_BYTES];
-    let (width, height) = dimensions(Orientation::Landscape);
-    let pixels = vec![128; width * 3];
-    row(&mut output, Orientation::Landscape, 0, &pixels, 3).unwrap();
-    assert!(output[..frame::WIDTH / 2]
-        .iter()
-        .any(|byte| byte >> 4 != byte & 15));
-    assert!(row(&mut output, Orientation::Landscape, height, &pixels, 3).is_err());
-    assert!(row(&mut output, Orientation::Landscape, 0, &pixels, 0).is_err());
 }
 
 #[test]

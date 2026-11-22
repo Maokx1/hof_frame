@@ -3,6 +3,8 @@ use firmware::frame::*;
 #[test]
 fn n16r8_partition_budget_supports_seven_mb_and_preserves_frames() {
     let mut previous_end = 0x9000;
+    let mut found_upload = false;
+    let mut found_frames = false;
     for line in include_str!("../partitions.csv").lines() {
         if line.starts_with('#') || line.is_empty() {
             continue;
@@ -16,10 +18,14 @@ fn n16r8_partition_budget_supports_seven_mb_and_preserves_frames() {
         match fields[0] {
             "nvs" => assert_eq!(size, 24 * 1024),
             "upload" => {
+                found_upload = true;
+                assert_eq!((fields[1], fields[2]), ("data", "undefined"));
                 assert_eq!(size, 7 * 1024 * 1024);
                 assert!(size >= firmware::upload::MAX_UPLOAD_BYTES);
             }
             "frames" => {
+                found_frames = true;
+                assert_eq!((fields[1], fields[2]), ("data", "undefined"));
                 assert_eq!(offset, 0xe00000);
                 assert_eq!(size, STORAGE_BYTES);
             }
@@ -29,19 +35,9 @@ fn n16r8_partition_budget_supports_seven_mb_and_preserves_frames() {
         }
         previous_end = offset + size;
     }
+    assert!(found_upload && found_frames);
     assert_eq!(previous_end, 16 * 1024 * 1024);
     const { assert!(PAYLOAD_OFFSET + FRAME_BYTES <= SLOT_BYTES) };
-}
-
-#[test]
-fn generated_storage_fixture_has_exact_length_and_supported_palette() {
-    let fixture: Vec<_> = [0x01, 0x23, 0x56]
-        .into_iter()
-        .cycle()
-        .take(FRAME_BYTES)
-        .collect();
-    assert_eq!(fixture.len(), FRAME_BYTES);
-    assert!(valid_pixels(&fixture));
 }
 
 struct Flash {
@@ -139,32 +135,81 @@ fn empty_flash_selects_generated_default() {
 #[test]
 fn full_frame_commit_and_reload_preserve_metadata_and_pixels() {
     let mut flash = Flash::new();
-    let pixels = vec![0x35; FRAME_BYTES];
+    let mut pixels = vec![0x11; 192_000];
+    pixels[0] = 0x35;
+    pixels[399] = 0x26;
+    pixels[400] = 0x50;
+    pixels[191_999] = 0x16;
     let metadata = Metadata {
-        orientation: Orientation::Landscape,
+        orientation: Orientation::Portrait,
         battery_corner: Corner::BottomLeft,
-        battery_indicator_enabled: false,
+        battery_indicator_enabled: true,
     };
     let record = commit(&mut flash, &pixels, metadata).unwrap();
     assert_eq!(record.generation, 1);
+    assert_eq!(record.slot, 0);
+    assert_eq!(record.metadata, metadata);
     assert_eq!(scan(&mut flash).unwrap().current, Some(record));
-    assert_eq!(
-        &flash.bytes[record.payload_offset()..record.payload_offset() + FRAME_BYTES],
-        pixels
-    );
-    assert_eq!(pixel(&pixels, 0, 0), Some(3));
-    assert_eq!(pixel(&pixels, 1, 0), Some(5));
+    let stored = &flash.bytes[4096..4096 + 192_000];
+    assert_eq!(stored, pixels);
+    for (x, y, color) in [
+        (0, 0, 3),
+        (1, 0, 5),
+        (798, 0, 2),
+        (799, 0, 6),
+        (0, 1, 5),
+        (1, 1, 0),
+        (798, 479, 1),
+        (799, 479, 6),
+    ] {
+        assert_eq!(pixel(stored, x, y), Some(color), "pixel ({x}, {y})");
+    }
 }
 
 #[test]
 fn replacement_alternates_slots_and_selects_newest_generation() {
     let mut flash = Flash::new();
-    let pixels = vec![0x11; FRAME_BYTES];
-    for generation in 1..=3 {
-        let record = commit(&mut flash, &pixels, Metadata::default()).unwrap();
-        assert_eq!(record.generation, generation);
-        assert_eq!(record.slot, ((generation - 1) % 2) as usize);
-        assert_eq!(scan(&mut flash).unwrap().current, Some(record));
+    for (index, (color, metadata)) in [
+        (
+            0x11,
+            Metadata {
+                orientation: Orientation::Portrait,
+                battery_corner: Corner::TopLeft,
+                battery_indicator_enabled: true,
+            },
+        ),
+        (
+            0x33,
+            Metadata {
+                orientation: Orientation::Landscape,
+                battery_corner: Corner::BottomRight,
+                battery_indicator_enabled: false,
+            },
+        ),
+        (
+            0x66,
+            Metadata {
+                orientation: Orientation::Portrait,
+                battery_corner: Corner::BottomLeft,
+                battery_indicator_enabled: false,
+            },
+        ),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let pixels = vec![color; FRAME_BYTES];
+        let record = commit(&mut flash, &pixels, metadata).unwrap();
+        assert_eq!(record.generation, index as u64 + 1);
+        assert_eq!(record.slot, index % 2);
+        assert_eq!(record.metadata, metadata);
+        let current = scan(&mut flash).unwrap().current.unwrap();
+        assert_eq!(current, record);
+        assert_eq!(current.metadata, metadata);
+        assert_eq!(
+            &flash.bytes[current.payload_offset()..current.payload_offset() + FRAME_BYTES],
+            pixels
+        );
     }
 }
 
@@ -174,6 +219,8 @@ fn malformed_input_causes_no_flash_mutation() {
     for pixels in [
         vec![0x11; FRAME_BYTES - 1],
         vec![0x44; FRAME_BYTES],
+        vec![0x41; FRAME_BYTES],
+        vec![0x14; FRAME_BYTES],
         vec![0x1F; FRAME_BYTES],
     ] {
         assert_eq!(
@@ -190,7 +237,8 @@ fn every_supported_palette_code_is_accepted() {
         assert!(valid_pixels(&[color * 17]));
     }
     for color in [4, 7, 8, 9, 10, 11, 12, 13, 14, 15] {
-        assert!(!valid_pixels(&[color * 17]));
+        assert!(!valid_pixels(&[(color << 4) | 1]));
+        assert!(!valid_pixels(&[0x10 | color]));
     }
 }
 
@@ -395,12 +443,36 @@ fn unsupported_metadata_is_rejected_even_with_valid_header_crc() {
 
 #[test]
 fn frame_header_preserves_all_layouts_and_legacy_indicator_encoding() {
-    for orientation in [Orientation::Portrait, Orientation::Landscape] {
-        for corner in [
-            Corner::TopRight,
-            Corner::TopLeft,
-            Corner::BottomLeft,
-            Corner::BottomRight,
+    let legacy_header = [
+        b'H', b'O', b'F', b'1', // Magic
+        1, 0, 2, 4, // Version, portrait, bottom-left, bits per pixel
+        0x20, 0x03, 0xe0, 0x01, // 800 x 480
+        0x00, 0xee, 0x02, 0x00, // 192,000-byte payload
+        1, 0, 0, 0, 0, 0, 0, 0, // Generation
+        123, 0, 0, 0, // Payload checksum
+        0x28, 0x39, 0xfd, 0x09, // Header checksum
+        b'D', b'O', b'N', b'E', // Published
+    ];
+    let legacy_record = FrameRecord {
+        slot: 1,
+        generation: 1,
+        metadata: Metadata {
+            orientation: Orientation::Portrait,
+            battery_corner: Corner::BottomLeft,
+            battery_indicator_enabled: true,
+        },
+        payload_crc: 123,
+    };
+    assert_eq!(parse_header(&legacy_header, 1), Some(legacy_record));
+    assert_eq!(header(legacy_record), legacy_header);
+
+    for (orientation, orientation_code) in [(Orientation::Portrait, 0), (Orientation::Landscape, 1)]
+    {
+        for (corner, corner_code) in [
+            (Corner::TopRight, 0),
+            (Corner::TopLeft, 1),
+            (Corner::BottomLeft, 2),
+            (Corner::BottomRight, 3),
         ] {
             for enabled in [false, true] {
                 let record = FrameRecord {
@@ -414,7 +486,8 @@ fn frame_header_preserves_all_layouts_and_legacy_indicator_encoding() {
                     payload_crc: 123,
                 };
                 let encoded = header(record);
-                assert_eq!(encoded[6], corner as u8 | if enabled { 0 } else { 0x80 });
+                assert_eq!(encoded[5], orientation_code);
+                assert_eq!(encoded[6], corner_code | if enabled { 0 } else { 0x80 });
                 assert_eq!(parse_header(&encoded, 1), Some(record));
             }
         }

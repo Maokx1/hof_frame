@@ -5,9 +5,9 @@ use std::time::Duration;
 fn initial_idle_is_not_a_completed_refresh() {
     let mut busy = RefreshBusy::default();
     assert_eq!(busy.sample(Duration::ZERO, true), Ok(false));
-    assert_eq!(busy.sample(Duration::from_millis(40), true), Ok(false));
+    assert_eq!(busy.sample(Duration::from_millis(999), true), Ok(false));
     assert_eq!(
-        busy.sample(ASSERT_TIMEOUT, true),
+        busy.sample(Duration::from_secs(1), true),
         Err(BusyTimeout::NeverAsserted)
     );
 }
@@ -34,7 +34,11 @@ fn stuck_busy_times_out_even_if_it_returns_idle_at_the_deadline() {
         let mut busy = RefreshBusy::default();
         assert_eq!(busy.sample(Duration::ZERO, false), Ok(false));
         assert_eq!(
-            busy.sample(COMPLETE_TIMEOUT, idle),
+            busy.sample(Duration::from_millis(119_999), false),
+            Ok(false)
+        );
+        assert_eq!(
+            busy.sample(Duration::from_secs(120), idle),
             Err(BusyTimeout::NeverCompleted)
         );
     }
@@ -44,7 +48,7 @@ fn stuck_busy_times_out_even_if_it_returns_idle_at_the_deadline() {
 fn late_assertion_does_not_bypass_start_timeout() {
     let mut busy = RefreshBusy::default();
     assert_eq!(
-        busy.sample(ASSERT_TIMEOUT, false),
+        busy.sample(Duration::from_secs(1), false),
         Err(BusyTimeout::NeverAsserted)
     );
 }
@@ -64,10 +68,10 @@ fn minimum_busy_duration_is_measured_from_assertion() {
     let asserted_at = Duration::from_millis(900);
     for (duration, expected) in [
         (
-            MIN_WAVEFORM_BUSY - Duration::from_millis(1),
+            Duration::from_millis(999),
             Err(BusyTimeout::ImplausiblyShort),
         ),
-        (MIN_WAVEFORM_BUSY, Ok(true)),
+        (Duration::from_secs(1), Ok(true)),
     ] {
         let mut busy = RefreshBusy::default();
         assert_eq!(busy.sample(Duration::ZERO, true), Ok(false));

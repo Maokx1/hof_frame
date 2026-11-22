@@ -78,16 +78,25 @@ fn decodes_both_layouts_without_full_rgb_buffer() {
 #[test]
 fn alpha_and_sixteen_bit_are_supported() {
     let (width, height) = conversion::dimensions(frame::Metadata::default().orientation);
+    // Distinct high and low bytes expose incorrect 16-bit channel stripping.
+    let opaque_black = [0x00, 0xff, 0xff, 0x00];
+    let opaque_white = [0xff, 0x00, 0xff, 0x00];
+    let transparent_black = [0x00, 0xff, 0x00, 0xff];
+    let pixels = [opaque_black, opaque_white, transparent_black, opaque_white]
+        .concat()
+        .repeat(width * height / 4);
     let encoded = png(
         width as u32,
         height as u32,
         png::ColorType::GrayscaleAlpha,
         png::BitDepth::Sixteen,
-        &vec![0; width * height * 4],
+        &pixels,
     );
     let mut output = vec![0; frame::FRAME_BYTES];
     decode(&encoded, Default::default(), &mut output, || Ok(())).unwrap();
-    assert!(output.iter().all(|byte| *byte == 0x11));
+    for (index, byte) in output.iter().enumerate() {
+        assert_eq!(*byte, [0x01, 0x11][index % 2], "byte {index}");
+    }
 }
 
 #[test]
@@ -101,6 +110,7 @@ fn decodes_photo_sized_rgb_with_inflater_workspace() {
         random ^= random << 5;
         *byte = random as u8;
     }
+    pixels[..12].copy_from_slice(&[255, 0, 0, 0, 255, 0, 0, 0, 255, 255, 255, 255]);
     let encoded = png(
         width as u32,
         height as u32,
@@ -112,6 +122,7 @@ fn decodes_photo_sized_rgb_with_inflater_workspace() {
     assert!(encoded.len() <= firmware::upload::MAX_UPLOAD_BYTES);
     let mut output = vec![0; frame::FRAME_BYTES];
     decode(&encoded, Default::default(), &mut output, || Ok(())).unwrap();
+    assert_eq!(&output[..2], &[0x36, 0x51]);
     assert!(frame::valid_pixels(&output));
 }
 
@@ -298,15 +309,17 @@ fn indexed_png_expands_palette() {
     let mut encoded = Vec::new();
     let mut encoder = png::Encoder::new(&mut encoded, width as u32, height as u32);
     encoder.set_color(png::ColorType::Indexed);
-    encoder.set_palette(vec![255, 0, 0]);
+    encoder.set_palette(vec![255, 0, 0, 0, 255, 0, 0, 0, 255]);
     encoder
         .write_header()
         .unwrap()
-        .write_image_data(&vec![0; width * height])
+        .write_image_data(&[0, 1, 2, 1].repeat(width * height / 4))
         .unwrap();
     let mut output = vec![0; frame::FRAME_BYTES];
     decode(&encoded, Default::default(), &mut output, || Ok(())).unwrap();
-    assert!(output.iter().all(|byte| *byte == 0x33));
+    for (index, byte) in output.iter().enumerate() {
+        assert_eq!(*byte, [0x36, 0x56][index % 2], "byte {index}");
+    }
 }
 
 #[test]
@@ -320,13 +333,16 @@ fn interlacing_animation_corruption_and_dimension_bombs_fail() {
         &vec![0; width * height],
     );
     let mut output = vec![0x11; frame::FRAME_BYTES];
-    for (bad_width, interlaced) in [(width as u32 + 1, 1), (100_000, 0)] {
+    for (bad_width, interlaced) in [(width as u32, 1), (width as u32 + 1, 0), (100_000, 0)] {
         let mut encoded = original.clone();
         encoded[16..20].copy_from_slice(&bad_width.to_be_bytes());
         encoded[28] = interlaced;
         let crc = frame::crc32(&encoded[12..29]);
         encoded[29..33].copy_from_slice(&crc.to_be_bytes());
-        assert!(decode(&encoded, Default::default(), &mut output, || Ok(())).is_err());
+        assert!(matches!(
+            decode(&encoded, Default::default(), &mut output, || Ok(())),
+            Err(DecodeError::UnsupportedLayout)
+        ));
         assert!(output.iter().all(|byte| *byte == 0x11));
     }
     let mut encoded = original;

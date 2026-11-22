@@ -104,6 +104,15 @@ fn usb_display_failure_defers_a_full_interval_without_recording_success() {
 }
 
 #[test]
+fn failed_refresh_keeps_the_previous_manual_limit() {
+    let mut schedule = RefreshSchedule::new(0);
+    schedule.refresh_succeeded(10, true);
+    schedule.defer_retry(20, 100);
+    assert!(!schedule.manual_allowed(59, 50));
+    assert!(schedule.manual_allowed(60, 50));
+}
+
+#[test]
 fn success_clears_recovery_cooldown() {
     let mut schedule = RefreshSchedule::new(0);
     schedule.defer_retry(50, 100);
@@ -123,10 +132,13 @@ fn clock_regression_does_not_bypass_manual_limit() {
 
 #[test]
 fn deadlines_saturate_instead_of_wrapping() {
-    let mut schedule = RefreshSchedule::new(u64::MAX - 5);
+    let schedule = RefreshSchedule::new(u64::MAX - 5);
     assert_eq!(schedule.deadline_us(100), u64::MAX);
-    schedule.defer_retry(u64::MAX - 2, 100);
-    assert_eq!(schedule.deadline_us(100), u64::MAX);
+    let mut retry = RefreshSchedule::new(0);
+    retry.defer_retry(u64::MAX - 2, 100);
+    assert_eq!(retry.deadline_us(100), u64::MAX);
+    assert!(retry.cooling_down(u64::MAX - 1));
+    assert!(!retry.cooling_down(u64::MAX));
 }
 
 #[test]
@@ -158,22 +170,4 @@ fn failed_manual_override_does_not_clear_recovery_cooldown() {
     assert_eq!(schedule.deadline_us(100), 110);
     assert!(schedule.cooling_down(20));
     assert!(schedule.manual_allowed(20, 50));
-}
-
-#[test]
-fn production_upload_completion_preserves_manual_limit_across_retention() {
-    let second = 1_000_000;
-    let mut schedule = RefreshSchedule::new(0);
-    schedule.refresh_succeeded(10 * second, true);
-    schedule.refresh_succeeded(300 * second, false);
-    let retained = schedule;
-    assert_eq!(
-        retained.deadline_us(DAILY_INTERVAL_US),
-        300 * second + DAILY_INTERVAL_US
-    );
-    assert!(!retained.manual_allowed(10 * second + MANUAL_LIMIT_US - 1, MANUAL_LIMIT_US));
-    assert!(retained.manual_allowed(10 * second + MANUAL_LIMIT_US, MANUAL_LIMIT_US));
-    let mut first_upload = RefreshSchedule::new(0);
-    first_upload.refresh_succeeded(300 * second, false);
-    assert!(first_upload.manual_allowed(300 * second, MANUAL_LIMIT_US));
 }

@@ -39,29 +39,31 @@ impl DiagnosticStore for Store {
 }
 
 #[test]
-fn diagnostic_record_roundtrips_every_phase_and_reason() {
-    for phase in [
-        WorkPhase::Idle,
-        WorkPhase::Setup,
-        WorkPhase::Upload,
-        WorkPhase::Decode,
-        WorkPhase::Save,
-        WorkPhase::Display,
-        WorkPhase::PanelCleanup,
-        WorkPhase::SafetyCleanup,
-        WorkPhase::RadioCleanup,
-        WorkPhase::LoadFrame,
-        WorkPhase::Unknown,
+fn diagnostic_records_preserve_persisted_phase_and_reason_codes() {
+    for (phase, phase_code) in [
+        (WorkPhase::Idle, 0),
+        (WorkPhase::Setup, 1),
+        (WorkPhase::Upload, 2),
+        (WorkPhase::Decode, 3),
+        (WorkPhase::Save, 4),
+        (WorkPhase::Display, 5),
+        (WorkPhase::PanelCleanup, 6),
+        (WorkPhase::SafetyCleanup, 7),
+        (WorkPhase::RadioCleanup, 8),
+        (WorkPhase::LoadFrame, 9),
+        (WorkPhase::Unknown, 255),
     ] {
-        for reason in [
-            FaultReason::None,
-            FaultReason::Interrupted,
-            FaultReason::Brownout,
-            FaultReason::InvalidState,
-            FaultReason::RuntimeFailure,
+        for (reason, reason_code) in [
+            (FaultReason::None, 0),
+            (FaultReason::Interrupted, 1),
+            (FaultReason::Brownout, 2),
+            (FaultReason::InvalidState, 3),
+            (FaultReason::RuntimeFailure, 4),
         ] {
             let value = Diagnostic { phase, reason };
-            assert_eq!(Diagnostic::from_record(value.record()), Some(value));
+            let record = 0xD100_0000 | (phase_code << 8) | reason_code;
+            assert_eq!(value.record(), record);
+            assert_eq!(Diagnostic::from_record(record), Some(value));
         }
     }
     for invalid in [0, 0xD200_0000, 0xD101_0000, 0xD100_0A00, 0xD100_0005] {
@@ -144,29 +146,24 @@ fn interrupted_work_latches_on_reopen() {
 }
 
 #[test]
-fn brownout_latches_even_with_clean_record() {
-    let guard = SafetyGuard::open(
-        Store {
-            value: Some(0xA0),
-            ..Store::default()
-        },
-        true,
-    )
-    .unwrap();
-    assert_eq!(guard.state(), SafetyState::Latched);
-}
+fn brownout_and_unknown_records_latch_across_reboots() {
+    for (value, brownout) in [(0xA0, true), (0x42, false)] {
+        let mut guard = SafetyGuard::open(
+            Store {
+                value: Some(value),
+                ..Store::default()
+            },
+            brownout,
+        )
+        .unwrap();
+        assert_eq!(guard.state(), SafetyState::Latched);
+        assert_eq!(guard.store.value, Some(0xA2));
+        assert_eq!(guard.begin_work(), Err(SafetyError::Blocked));
 
-#[test]
-fn unknown_record_is_latched_not_treated_as_first_boot() {
-    let guard = SafetyGuard::open(
-        Store {
-            value: Some(0x42),
-            ..Store::default()
-        },
-        false,
-    )
-    .unwrap();
-    assert_eq!(guard.store.value, Some(0xA2));
+        let mut rebooted = SafetyGuard::open(guard.store, false).unwrap();
+        assert_eq!(rebooted.state(), SafetyState::Latched);
+        assert_eq!(rebooted.begin_work(), Err(SafetyError::Blocked));
+    }
 }
 
 #[test]
