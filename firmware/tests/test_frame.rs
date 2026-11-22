@@ -50,6 +50,8 @@ struct Flash {
     fail_at: Option<usize>,
     torn: bool,
     read_error: bool,
+    read_error_after_mutations: Option<usize>,
+    corrupt_write_at: Option<usize>,
 }
 
 impl Flash {
@@ -60,6 +62,8 @@ impl Flash {
             fail_at: None,
             torn: false,
             read_error: false,
+            read_error_after_mutations: None,
+            corrupt_write_at: None,
         }
     }
 }
@@ -68,7 +72,11 @@ impl FrameStorage for Flash {
     type Error = &'static str;
 
     fn read(&mut self, offset: usize, bytes: &mut [u8]) -> Result<(), Self::Error> {
-        if self.read_error {
+        if self.read_error
+            || self
+                .read_error_after_mutations
+                .is_some_and(|count| self.mutations >= count)
+        {
             return Err("read");
         }
         bytes.copy_from_slice(&self.bytes[offset..offset + bytes.len()]);
@@ -106,6 +114,9 @@ impl FrameStorage for Flash {
         if failed {
             Err("write")
         } else {
+            if self.corrupt_write_at == Some(offset) && !bytes.is_empty() {
+                self.bytes[offset] = 0;
+            }
             Ok(())
         }
     }
@@ -197,8 +208,15 @@ fn interrupted_erase_payload_header_and_publication_keep_old_frame() {
                 fail_at: Some(operation),
                 torn,
                 read_error: false,
+                read_error_after_mutations: None,
+                corrupt_write_at: None,
             };
-            assert!(commit(&mut flash, &pixels, Metadata::default()).is_err());
+            let expected = if operation == 1 { "erase" } else { "write" };
+            assert_eq!(
+                commit(&mut flash, &pixels, Metadata::default()),
+                Err(FrameError::Storage(expected)),
+                "operation={operation}, torn={torn}"
+            );
             assert_eq!(
                 scan(&mut flash).unwrap().current,
                 Some(old),
@@ -258,6 +276,64 @@ fn candidate_readback_failure_prevents_publication() {
 }
 
 #[test]
+fn corrupt_publication_tag_fails_verification_and_preserves_previous_frame() {
+    let mut flash = Flash::new();
+    let pixels = vec![0x11; FRAME_BYTES];
+    let old = commit(&mut flash, &pixels, Metadata::default()).unwrap();
+    let candidate_slot = 1 - old.slot;
+    flash.corrupt_write_at = Some(candidate_slot * SLOT_BYTES + 32);
+
+    assert_eq!(
+        commit(&mut flash, &pixels, Metadata::default()),
+        Err(FrameError::Verification)
+    );
+    let result = scan(&mut flash).unwrap();
+    assert_eq!(result.current, Some(old));
+    assert_eq!(
+        result.slots[candidate_slot],
+        SlotStatus::Invalid(InvalidFrame::Header)
+    );
+}
+
+#[test]
+fn candidate_read_error_prevents_publication() {
+    let mut flash = Flash::new();
+    let pixels = vec![0x11; FRAME_BYTES];
+    let old = commit(&mut flash, &pixels, Metadata::default()).unwrap();
+    flash.read_error_after_mutations = Some(flash.mutations + 1);
+
+    assert_eq!(
+        commit(&mut flash, &pixels, Metadata::default()),
+        Err(FrameError::Storage("read"))
+    );
+    flash.read_error_after_mutations = None;
+    let result = scan(&mut flash).unwrap();
+    assert_eq!(result.current, Some(old));
+    assert_eq!(result.slots[1 - old.slot], SlotStatus::Empty);
+}
+
+#[test]
+fn published_header_read_error_reports_failure_even_if_new_frame_is_valid() {
+    let mut flash = Flash::new();
+    let pixels = vec![0x11; FRAME_BYTES];
+    let old = commit(&mut flash, &pixels, Metadata::default()).unwrap();
+    let writes = FRAME_BYTES.div_ceil(CHUNK_BYTES);
+    flash.read_error_after_mutations = Some(flash.mutations + 1 + writes + 2);
+
+    assert_eq!(
+        commit(&mut flash, &pixels, Metadata::default()),
+        Err(FrameError::Storage("read"))
+    );
+    flash.read_error_after_mutations = None;
+    let result = scan(&mut flash).unwrap();
+    assert_eq!(result.slots[old.slot], SlotStatus::Valid(old));
+    assert!(matches!(
+        result.current,
+        Some(record) if record.slot == 1 - old.slot && record.generation == old.generation + 1
+    ));
+}
+
+#[test]
 fn invalid_palette_is_rejected_even_with_matching_payload_checksum() {
     let mut flash = Flash::new();
     let record = FrameRecord {
@@ -314,6 +390,34 @@ fn unsupported_metadata_is_rejected_even_with_valid_header_crc() {
         let checksum = crc32(&bytes[..28]);
         bytes[28..32].copy_from_slice(&checksum.to_le_bytes());
         assert_eq!(parse_header(&bytes, 0), None);
+    }
+}
+
+#[test]
+fn frame_header_preserves_all_layouts_and_legacy_indicator_encoding() {
+    for orientation in [Orientation::Portrait, Orientation::Landscape] {
+        for corner in [
+            Corner::TopRight,
+            Corner::TopLeft,
+            Corner::BottomLeft,
+            Corner::BottomRight,
+        ] {
+            for enabled in [false, true] {
+                let record = FrameRecord {
+                    slot: 1,
+                    generation: 1,
+                    metadata: Metadata {
+                        orientation,
+                        battery_corner: corner,
+                        battery_indicator_enabled: enabled,
+                    },
+                    payload_crc: 123,
+                };
+                let encoded = header(record);
+                assert_eq!(encoded[6], corner as u8 | if enabled { 0 } else { 0x80 });
+                assert_eq!(parse_header(&encoded, 1), Some(record));
+            }
+        }
     }
 }
 

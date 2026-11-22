@@ -240,7 +240,9 @@ fn release_gate_rejects_held_and_bouncing_presses_and_rearms_after_release() {
     assert!(!gate.armed());
     assert!(!gate.sample(start + std::time::Duration::from_millis(6050), false));
     assert!(gate.armed());
-    assert!(gate.sample(start + std::time::Duration::from_millis(6051), true));
+    assert!(!gate.sample(start + std::time::Duration::from_millis(6051), false));
+    assert!(gate.armed());
+    assert!(gate.sample(start + std::time::Duration::from_millis(6052), true));
     assert!(!gate.sample(start + std::time::Duration::from_secs(7), true));
     assert!(!gate.sample(start + std::time::Duration::from_secs(8), false));
     assert!(!gate.sample(start + std::time::Duration::from_millis(8050), false));

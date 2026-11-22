@@ -78,7 +78,10 @@ fn unknown_text_fits_reduced_height_and_all_percentages_fit() {
             "duplicate label for {value}%"
         );
     }
-    assert!(StatusOverlay::new(enabled_metadata(), Some(101)).is_err());
+    assert!(matches!(
+        StatusOverlay::new(enabled_metadata(), Some(101)),
+        Err(OverlayError::InvalidPercentage(101))
+    ));
     assert_eq!(unknown.pixel(frame::WIDTH, 0), None);
     assert_eq!(unknown.pixel(0, frame::HEIGHT), None);
 }

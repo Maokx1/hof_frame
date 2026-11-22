@@ -1,4 +1,4 @@
-use firmware::frame::{Corner, Orientation};
+use firmware::frame::{Corner, Metadata, Orientation};
 use firmware::upload::*;
 use std::io::Cursor;
 use std::io::{self, Write};
@@ -229,6 +229,29 @@ fn streams_seven_mb_in_small_writes_and_reports_storage_failures() {
 }
 
 #[test]
+fn upload_read_failures_are_distinguished_from_storage_failures() {
+    struct FailingReader;
+
+    impl io::Read for FailingReader {
+        fn read(&mut self, _: &mut [u8]) -> io::Result<usize> {
+            Err(io::Error::new(
+                io::ErrorKind::ConnectionReset,
+                "client disconnected",
+            ))
+        }
+    }
+
+    let mut reader = io::BufReader::new(FailingReader);
+    let mut destination = Vec::new();
+    let result = receive_to(&mut reader, BodyLength::Known(1), &mut destination, 1);
+    assert!(matches!(
+        result,
+        Err(ReceiveError::Io(error)) if error.kind() == io::ErrorKind::ConnectionReset
+    ));
+    assert!(destination.is_empty());
+}
+
+#[test]
 fn declared_seven_mb_is_accepted_and_one_more_is_rejected_before_writing() {
     for (length, accepted) in [(7_000_000, true), (7_000_001, false)] {
         let result = request(&mut Cursor::new(headers(&format!(
@@ -274,15 +297,53 @@ fn chunked_unknown_length_is_bounded_cumulatively() {
 #[test]
 fn malformed_or_truncated_bodies_fail() {
     let mut output = [0; 20];
-    for bytes in [
-        b"Z\r\n".as_slice(),
-        b"3\r\nab",
-        b"1\r\naXX",
-        b"1\r\na\r\n0\r\n",
-    ] {
-        assert!(receive(&mut Cursor::new(bytes), BodyLength::Chunked, &mut output).is_err());
+    for bytes in [b"Z\r\n".as_slice(), b"1\r\naXX", b"1\r\na\r\n0\r\n"] {
+        assert!(matches!(
+            receive(&mut Cursor::new(bytes), BodyLength::Chunked, &mut output),
+            Err(ReceiveError::InvalidRequest)
+        ));
     }
-    assert!(receive(&mut Cursor::new(b"a"), BodyLength::Known(2), &mut output).is_err());
+    for (bytes, length) in [
+        (b"3\r\nab".as_slice(), BodyLength::Chunked),
+        (b"a".as_slice(), BodyLength::Known(2)),
+    ] {
+        assert!(matches!(
+            receive(&mut Cursor::new(bytes), length, &mut output),
+            Err(ReceiveError::Io(error)) if error.kind() == io::ErrorKind::UnexpectedEof
+        ));
+    }
+}
+
+#[test]
+fn chunk_framing_limits_and_size_overflow_fail_without_writing() {
+    let oversized_chunk_header = format!("1;{}\r\n", "x".repeat(128 * 1024));
+    let oversized_trailer = format!("0\r\nX: {}\r\n\r\n", "x".repeat(8192));
+    for body in [oversized_chunk_header, oversized_trailer] {
+        let mut destination = Vec::new();
+        assert!(matches!(
+            receive_to(
+                &mut Cursor::new(body),
+                BodyLength::Chunked,
+                &mut destination,
+                MAX_UPLOAD_BYTES,
+            ),
+            Err(ReceiveError::InvalidRequest)
+        ));
+        assert!(destination.is_empty());
+    }
+
+    let overflow = format!("{}\r\n", "F".repeat(2 * std::mem::size_of::<usize>() + 1));
+    let mut destination = Vec::new();
+    assert!(matches!(
+        receive_to(
+            &mut Cursor::new(overflow),
+            BodyLength::Chunked,
+            &mut destination,
+            MAX_UPLOAD_BYTES,
+        ),
+        Err(ReceiveError::TooLarge)
+    ));
+    assert!(destination.is_empty());
 }
 
 fn headers(extra: &str) -> Vec<u8> {
@@ -311,6 +372,133 @@ fn parses_layout_and_chunked_or_declared_length() {
         request(&mut Cursor::new(b"GET / HTTP/1.1\r\nHost: x\r\n\r\n")).unwrap(),
         Request::Page
     );
+}
+
+#[test]
+fn all_upload_layouts_and_indicator_settings_are_accepted() {
+    for (orientation, expected_orientation) in [
+        ("portrait", Orientation::Portrait),
+        ("landscape", Orientation::Landscape),
+    ] {
+        for (corner, expected_corner) in [
+            ("top-right", Corner::TopRight),
+            ("top-left", Corner::TopLeft),
+            ("bottom-left", Corner::BottomLeft),
+            ("bottom-right", Corner::BottomRight),
+        ] {
+            for (indicator, enabled) in [("on", true), ("off", false)] {
+                let query =
+                    format!("orientation={orientation}&corner={corner}&indicator={indicator}");
+                let request = request(&mut Cursor::new(headers_with_query(
+                    &query,
+                    "Content-Length: 1\r\n",
+                )))
+                .unwrap();
+                assert_eq!(
+                    request,
+                    Request::Upload {
+                        body: BodyLength::Known(1),
+                        metadata: Metadata {
+                            orientation: expected_orientation,
+                            battery_corner: expected_corner,
+                            battery_indicator_enabled: enabled,
+                        },
+                    }
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn malformed_upload_layouts_are_rejected() {
+    for query in [
+        "orientation=sideways&corner=top-right",
+        "orientation=landscape&corner=center",
+        "orientation=portrait",
+        "corner=top-right",
+        "orientation&corner=top-right",
+        "orientation=portrait&corner=top-right&corner=bottom-left",
+        "orientation=portrait&corner=top-right&orientation=landscape",
+        "orientation=portrait&corner=top-right&extra=value",
+    ] {
+        assert!(
+            matches!(
+                request(&mut Cursor::new(headers_with_query(
+                    query,
+                    "Content-Length: 1\r\n",
+                ))),
+                Err(ReceiveError::InvalidRequest)
+            ),
+            "{query}"
+        );
+    }
+}
+
+#[test]
+fn invalid_request_lines_and_headers_are_rejected() {
+    for request_bytes in [
+        b"GET / HTTP/1.1\n\n".as_slice(),
+        b"GET / HTTP/1.0\r\n\r\n",
+        b"GET /\r\n\r\n",
+        b"GET / HTTP/1.1 extra\r\n\r\n",
+        b"GET / HTTP/1.1\r\nX: \xff\r\n\r\n",
+        b"GET / HTTP/1.1\r\nMalformed\r\n\r\n",
+    ] {
+        assert!(
+            matches!(
+                request(&mut Cursor::new(request_bytes)),
+                Err(ReceiveError::InvalidRequest)
+            ),
+            "{request_bytes:?}"
+        );
+    }
+}
+
+#[test]
+fn request_header_budget_accepts_exact_limit_and_rejects_one_more_byte() {
+    let prefix = "GET / HTTP/1.1\r\nX: ";
+    let suffix = "\r\n\r\n";
+    let padding = 8192 - prefix.len() - suffix.len();
+    let exact = format!("{prefix}{}{suffix}", "x".repeat(padding));
+    assert_eq!(request(&mut Cursor::new(exact)).unwrap(), Request::Page);
+
+    let oversized = format!("{prefix}{}{suffix}", "x".repeat(padding + 1));
+    assert!(matches!(
+        request(&mut Cursor::new(oversized)),
+        Err(ReceiveError::InvalidRequest)
+    ));
+}
+
+#[test]
+fn unsupported_routes_methods_and_image_types_are_rejected() {
+    for request_bytes in [
+        "DELETE / HTTP/1.1\r\n\r\n",
+        "GET / HTTP/1.1\r\nContent-Length: 1\r\n\r\n",
+        "POST /upload HTTP/1.1\r\nContent-Type: image/png\r\nContent-Length: 1\r\n\r\n",
+        concat!(
+            "POST /other?orientation=landscape&corner=top-right HTTP/1.1\r\n",
+            "Content-Type: image/png\r\nContent-Length: 1\r\n\r\n",
+        ),
+    ] {
+        assert!(
+            matches!(
+                request(&mut Cursor::new(request_bytes)),
+                Err(ReceiveError::InvalidRequest)
+            ),
+            "{request_bytes:?}"
+        );
+    }
+
+    for content_type in ["", "Content-Type: image/gif\r\n"] {
+        let bytes = format!(
+            "POST /upload?orientation=landscape&corner=top-right HTTP/1.1\r\n{content_type}Content-Length: 1\r\n\r\n"
+        );
+        assert!(matches!(
+            request(&mut Cursor::new(bytes)),
+            Err(ReceiveError::UnsupportedImage)
+        ));
+    }
 }
 
 #[test]
@@ -354,12 +542,26 @@ fn rejects_oversize_duplicate_and_ambiguous_framing() {
     for extra in [
         "Content-Length: 1\r\nContent-Length: 1\r\n",
         "Content-Length: 1\r\nTransfer-Encoding: chunked\r\n",
+        "Content-Length: 1\r\nContent-Type: image/jpeg\r\n",
+        "Content-Length: 1\r\nExpect: 100-continue\r\n",
+        "Transfer-Encoding: chunked\r\nTransfer-Encoding: chunked\r\n",
         "Transfer-Encoding: gzip\r\n",
         "",
         "Content-Length: -1\r\n",
     ] {
-        assert!(request(&mut Cursor::new(headers(extra))).is_err());
+        assert!(
+            matches!(
+                request(&mut Cursor::new(headers(extra))),
+                Err(ReceiveError::InvalidRequest)
+            ),
+            "{extra:?}"
+        );
     }
+    let overflow = format!("Content-Length: {}0\r\n", usize::MAX);
+    assert!(matches!(
+        request(&mut Cursor::new(headers(&overflow))),
+        Err(ReceiveError::TooLarge)
+    ));
     assert!(request(&mut Cursor::new(format!(
         "GET / HTTP/1.1\r\nX: {}\r\n\r\n",
         "a".repeat(9000)

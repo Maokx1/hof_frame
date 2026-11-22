@@ -5,6 +5,7 @@ struct Store {
     value: Option<u8>,
     writes: usize,
     fail: bool,
+    fail_state_write: bool,
     phase: Option<WorkPhase>,
 }
 
@@ -18,7 +19,7 @@ impl SafetyStore for Store {
         }
     }
     fn write(&mut self, value: u8) -> Result<(), Self::Error> {
-        if self.fail {
+        if self.fail || self.fail_state_write {
             return Err("write");
         }
         self.value = Some(value);
@@ -276,14 +277,43 @@ fn repeated_recovery_checks_do_not_rewrite_latch() {
 }
 
 #[test]
-fn failed_recovery_read_blocks_work() {
+fn failed_recovery_read_blocks_work_until_clean_state_is_verified() {
     let mut guard = SafetyGuard::open(Store::default(), false).unwrap();
     guard.store.fail = true;
     assert_eq!(
         guard.recover_interrupted_work(),
         Err(SafetyError::Storage("read"))
     );
+    assert_eq!(guard.state(), SafetyState::Latched);
     assert_eq!(guard.begin_work(), Err(SafetyError::Blocked));
+
+    guard.store.fail = false;
+    let writes = guard.store.writes;
+    guard.recover_interrupted_work().unwrap();
+    assert_eq!(guard.state(), SafetyState::Clean);
+    assert_eq!(guard.store.writes, writes);
+    guard.begin_work().unwrap();
+    assert_eq!(guard.store.value, Some(0xA1));
+}
+
+#[test]
+fn failed_recovery_latch_write_blocks_work_and_preserves_interrupted_marker() {
+    let mut guard = SafetyGuard::open(Store::default(), false).unwrap();
+    guard.begin_work().unwrap();
+    guard.store.fail_state_write = true;
+
+    assert_eq!(
+        guard.recover_interrupted_work(),
+        Err(SafetyError::Storage("write"))
+    );
+    assert_eq!(guard.state(), SafetyState::Latched);
+    assert_eq!(guard.store.value, Some(0xA1));
+    assert_eq!(guard.begin_work(), Err(SafetyError::Blocked));
+
+    guard.store.fail_state_write = false;
+    let rebooted = SafetyGuard::open(guard.store, false).unwrap();
+    assert_eq!(rebooted.state(), SafetyState::Latched);
+    assert_eq!(rebooted.store.value, Some(0xA2));
 }
 
 #[test]

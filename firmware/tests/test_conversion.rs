@@ -69,3 +69,34 @@ fn dithered_gray_contains_multiple_colors_and_bad_rows_fail() {
     assert!(row(&mut output, Orientation::Landscape, height, &pixels, 3).is_err());
     assert!(row(&mut output, Orientation::Landscape, 0, &pixels, 0).is_err());
 }
+
+#[test]
+fn invalid_rows_return_typed_errors_without_modifying_output() {
+    let (width, height) = dimensions(Orientation::Landscape);
+    let pixels = vec![0; width * 3];
+    let mut output = vec![0x11; FRAME_BYTES];
+
+    for (y, input, channels) in [
+        (height, pixels.as_slice(), 3),
+        (0, pixels.as_slice(), 0),
+        (0, pixels.as_slice(), 5),
+        (0, &pixels[..pixels.len() - 1], 3),
+    ] {
+        assert_eq!(
+            row(&mut output, Orientation::Landscape, y, input, channels),
+            Err(ConversionError::InvalidRow)
+        );
+        assert!(output.iter().all(|byte| *byte == 0x11));
+    }
+    assert_eq!(
+        row(
+            &mut output[..FRAME_BYTES - 1],
+            Orientation::Landscape,
+            0,
+            &pixels,
+            3,
+        ),
+        Err(ConversionError::InvalidRow)
+    );
+    assert!(output.iter().all(|byte| *byte == 0x11));
+}

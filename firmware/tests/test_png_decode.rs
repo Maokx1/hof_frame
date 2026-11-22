@@ -1,6 +1,6 @@
 use firmware::png_decode::*;
 use firmware::{conversion, frame};
-use std::io::Cursor;
+use std::io::{self, Cursor, Read, Seek, SeekFrom};
 
 #[test]
 fn qualification_signature_only_upload_is_rejected_before_pixel_conversion() {
@@ -9,6 +9,20 @@ fn qualification_signature_only_upload_is_rejected_before_pixel_conversion() {
     let mut packed = vec![0x11; frame::FRAME_BYTES];
     assert!(decode(encoded, frame::Metadata::default(), &mut packed, || Ok(())).is_err());
     assert!(packed.iter().all(|byte| *byte == 0x11));
+}
+
+#[test]
+fn wrong_output_size_is_rejected_before_decoding() {
+    for len in [frame::FRAME_BYTES - 1, frame::FRAME_BYTES + 1] {
+        let mut output = vec![0x11; len];
+        assert!(matches!(
+            decode(&[], Default::default(), &mut output, || {
+                panic!("buffer size must be checked before decoding")
+            }),
+            Err(DecodeError::OverBudget)
+        ));
+        assert!(output.iter().all(|byte| *byte == 0x11));
+    }
 }
 
 fn png(
@@ -143,14 +157,16 @@ fn streams_exact_seven_mb_png_and_rejects_one_more_before_conversion() {
     assert!(frame::valid_pixels(&output));
     encoded.push(0);
     output.fill(0x11);
-    assert!(decode_reader(
-        std::io::BufReader::with_capacity(4096, Cursor::new(&encoded)),
-        encoded.len(),
-        Default::default(),
-        &mut output,
-        || panic!("oversize must fail before decoding"),
-    )
-    .is_err());
+    assert!(matches!(
+        decode_reader(
+            std::io::BufReader::with_capacity(4096, Cursor::new(&encoded)),
+            encoded.len(),
+            Default::default(),
+            &mut output,
+            || panic!("oversize must fail before decoding"),
+        ),
+        Err(DecodeError::OverBudget)
+    ));
     assert!(output.iter().all(|byte| *byte == 0x11));
 }
 
@@ -165,10 +181,12 @@ fn malformed_wrong_dimensions_and_deadline_are_rejected() {
         &vec![255; width * height],
     );
     let mut output = vec![0; frame::FRAME_BYTES];
-    assert!(decode(&encoded, Default::default(), &mut output, || Err(
-        DecodeError::DeadlineExceeded
-    ))
-    .is_err());
+    assert!(matches!(
+        decode(&encoded, Default::default(), &mut output, || Err(
+            DecodeError::DeadlineExceeded
+        )),
+        Err(DecodeError::DeadlineExceeded)
+    ));
     assert!(decode(
         &encoded[..encoded.len() / 2],
         Default::default(),
@@ -176,9 +194,102 @@ fn malformed_wrong_dimensions_and_deadline_are_rejected() {
         || Ok(())
     )
     .is_err());
-    assert!(decode(b"\xff\xd8\xff", Default::default(), &mut output, || Ok(())).is_err());
+    assert!(matches!(
+        decode(b"\xff\xd8\xff", Default::default(), &mut output, || Ok(())),
+        Err(DecodeError::Png(_))
+    ));
     let small = png(1, 1, png::ColorType::Rgb, png::BitDepth::Eight, &[0, 0, 0]);
-    assert!(decode(&small, Default::default(), &mut output, || Ok(())).is_err());
+    assert!(matches!(
+        decode(&small, Default::default(), &mut output, || Ok(())),
+        Err(DecodeError::UnsupportedLayout)
+    ));
+}
+
+#[test]
+fn deadline_during_conversion_stops_decoding() {
+    let (width, height) = conversion::dimensions(frame::Metadata::default().orientation);
+    let encoded = png(
+        width as u32,
+        height as u32,
+        png::ColorType::Grayscale,
+        png::BitDepth::Eight,
+        &vec![255; width * height],
+    );
+    let mut output = vec![0x66; frame::FRAME_BYTES];
+    let mut checkpoints = 0;
+    let result = decode(&encoded, Default::default(), &mut output, || {
+        checkpoints += 1;
+        if checkpoints == 3 {
+            Err(DecodeError::DeadlineExceeded)
+        } else {
+            Ok(())
+        }
+    });
+
+    assert!(matches!(result, Err(DecodeError::DeadlineExceeded)));
+    assert_eq!(checkpoints, 3);
+    assert!(output.contains(&0x11));
+    assert!(output.contains(&0x66));
+}
+
+#[test]
+fn staging_read_failure_is_preserved_as_a_png_io_error() {
+    struct FailingRead {
+        input: Cursor<Vec<u8>>,
+        remaining: usize,
+    }
+
+    impl Read for FailingRead {
+        fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+            if buffer.is_empty() {
+                return Ok(0);
+            }
+            if self.remaining == 0 {
+                return Err(io::Error::other("staging read failed"));
+            }
+            let limit = buffer.len().min(self.remaining);
+            let count = self.input.read(&mut buffer[..limit])?;
+            self.remaining -= count;
+            Ok(count)
+        }
+    }
+
+    impl Seek for FailingRead {
+        fn seek(&mut self, position: SeekFrom) -> io::Result<u64> {
+            self.input.seek(position)
+        }
+    }
+
+    let (width, height) = conversion::dimensions(frame::Metadata::default().orientation);
+    let encoded = png(
+        width as u32,
+        height as u32,
+        png::ColorType::Grayscale,
+        png::BitDepth::Eight,
+        &vec![255; width * height],
+    );
+    let encoded_len = encoded.len();
+    let reader = io::BufReader::with_capacity(
+        64,
+        FailingRead {
+            input: Cursor::new(encoded),
+            remaining: encoded_len / 2,
+        },
+    );
+    let mut output = vec![0; frame::FRAME_BYTES];
+
+    let error = decode_reader(reader, encoded_len, Default::default(), &mut output, || {
+        Ok(())
+    })
+    .unwrap_err();
+    assert!(
+        matches!(
+            &error,
+            DecodeError::Png(png::DecodingError::IoError(source))
+                if source.kind() == io::ErrorKind::Other && source.to_string() == "staging read failed"
+        ),
+        "{error:?}"
+    );
 }
 
 #[test]
