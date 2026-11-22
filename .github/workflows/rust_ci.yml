@@ -11,7 +11,9 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+permissions:
+  contents: read
 
 jobs:
   rust-checks:
@@ -24,14 +26,10 @@ jobs:
       fail-fast: false
       matrix:
         action:
-          - command: build
-            args: --release
-          - command: build
-            args: --release --features usb
-          - command: fmt
-            args: --all -- --check --color always
+          - command: check
+            args: --locked
           - command: clippy
-            args: --lib --bin firmware --all-features -- -D warnings
+            args: --locked --lib --bin firmware --all-features -- -D warnings
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -60,12 +58,14 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          components: clippy
+          components: clippy, rustfmt
       - name: Enable caching
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: firmware
+      - name: Check formatting
+        run: cargo +stable fmt --all -- --check --color always
       - name: Run host tests
-        run: cargo +stable test --tests --all-features --target x86_64-unknown-linux-gnu
+        run: cargo +stable test --locked --tests --all-features --target x86_64-unknown-linux-gnu
       - name: Lint host tests
-        run: cargo +stable clippy --lib --tests --all-features --target x86_64-unknown-linux-gnu -- -D warnings
+        run: cargo +stable clippy --locked --lib --tests --all-features --target x86_64-unknown-linux-gnu -- -D warnings
