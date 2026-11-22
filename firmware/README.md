@@ -20,23 +20,73 @@ firmware modes.
 Use stable USB/bench power until ADC wiring, calibration, thresholds, and the
 external 5 V power path are qualified. Do not disable brownout protection.
 
+### Set the hotspot password once
+
+Store the password in `.cargo/wifi.local.toml`, which is explicitly ignored by
+Git (including editor backups). From `firmware`, run this once:
+
+```sh
+python3 - <<'PY'
+import getpass
+import json
+import os
+
+password = getpass.getpass("Hotspot password (8-63 printable ASCII characters): ")
+if not (8 <= len(password) <= 63 and all(0x20 <= ord(c) <= 0x7E for c in password)):
+    raise SystemExit("Invalid password; no file was written.")
+path = ".cargo/wifi.local.toml"
+fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+with os.fdopen(fd, "w", encoding="utf-8") as config:
+    config.write("[env]\nHOF_WIFI_PASSWORD = " + json.dumps(password) + "\n")
+print("Created " + path)
+PY
+```
+
+The prompt does not echo the password or put it in shell history. On Linux/macOS,
+the new file is readable and writable only by its owner. The command refuses to
+overwrite an existing file; edit it locally when changing the password.
+Verify the ignore rule with `git check-ignore .cargo/wifi.local.toml`.
+Do not force-add this file, copy it into tracked files, or share it.
+
+Alternatively, create the ignored local file from the
+[example](.cargo/example.wifi.local.toml), then edit the **local copy**:
+
+```sh
+cd firmware
+(umask 077; set -C; cat .cargo/example.wifi.local.toml > .cargo/wifi.local.toml)
+```
+
+This refuses to overwrite an existing local file. Replace `YOUR_PASSWORD` in
+`.cargo/wifi.local.toml` before building; it is only a placeholder, not a safe
+default. Keep the example unchanged so no real password is committed.
+
+Load it with `--config .cargo/wifi.local.toml` when building or flashing.
+Cargo does not load this filename automatically. An already exported
+`HOF_WIFI_PASSWORD` takes precedence; unset it to use the file's value.
+If Cargo reports that it cannot parse `.cargo/wifi.local.toml` as a dotted key,
+the file may not exist at that path. Run the setup above from `firmware` first,
+then run the commands below from the same directory.
+
 USB development:
 
 ```sh
 cd firmware
-bash -c 'read -r -s -p "Hotspot password (8-63 ASCII characters): " HOF_WIFI_PASSWORD; printf "\n"; export HOF_WIFI_PASSWORD; cargo run --release --features usb'
+cargo --config .cargo/wifi.local.toml run --release --features usb
 ```
 
 Production:
 
 ```sh
 cd firmware
-bash -c 'read -r -s -p "Hotspot password (8-63 ASCII characters): " HOF_WIFI_PASSWORD; printf "\n"; export HOF_WIFI_PASSWORD; cargo run --release'
+cargo --config .cargo/wifi.local.toml run --release
 ```
 
 The password is embedded at build time, never logged, and must not be committed
 or shared. It must be 8-63 printable ASCII characters. Builds without a valid
 password compile but refuse AP setup; there is no insecure default.
+The local file is plaintext, not an encrypted secret store. Compiled firmware
+also contains the password: keep those binaries private. For one-off builds or
+CI, exporting `HOF_WIFI_PASSWORD` still works without a local config file.
 
 Former save-only, display-only, battery-preview, and USB-bench feature names
 have been removed. Use `usb` instead. All automated host tests remain.
@@ -374,15 +424,16 @@ runner flashes the unit-test executable onto the board and starts the serial
 monitor. These tests are intended to run on the host, not under the board's
 watchdog and thread constraints. Always specify the host target as below.
 If you have flashed the test executable, stop the monitor with Ctrl+C and
-restore the application with `cargo run --release` (add `--features usb` for
+restore the application with `cargo --config .cargo/wifi.local.toml run --release`
+(add `--features usb` for
 USB testing), using your normal ESP-IDF environment and build-time password.
 
 ```sh
 cd firmware
 cargo +stable test --lib --target x86_64-unknown-linux-gnu
 python3 -c 'import sys; assert sys.prefix == sys.base_prefix, "Leave the Python virtual environment before building ESP-IDF"'
-cargo build --release
-cargo build --release --features usb
+cargo --config .cargo/wifi.local.toml build --release
+cargo --config .cargo/wifi.local.toml build --release --features usb
 cargo fmt -- --check
 ```
 
