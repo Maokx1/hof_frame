@@ -504,6 +504,13 @@ CI workflows live in the repository-root [.github/workflows](../.github/workflow
 GitHub Actions caches Cargo dependencies and ESP-IDF tools; a new cache key
 requires one successful run to populate it. The ESP Rust toolchain itself is
 still installed on each runner.
+
+CI runtime needs improvement: even with warm caches, 4-5 minutes is not
+acceptable long term. In a [November 2026 run](https://github.com/Maokx1/hof_frame/actions/runs/45066459918),
+the ESP jobs reinstalled the toolchain and rebuilt Rust's standard library and
+other dependencies despite cache hits. Reduce this time while retaining the
+existing checks, including on workflow-only changes.
+
 See [STATE_MACHINE.md](STATE_MACHINE.md) for target contracts and battery work.
 
 ## Validation and acceptance

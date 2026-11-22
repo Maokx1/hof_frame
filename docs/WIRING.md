@@ -108,6 +108,51 @@ implemented, so treat the converter cutoff as the only low-battery protection.
 6. Verify GPIO8/D9 pad access, divider output, ADC calibration, and cutoff
    behavior before enabling battery-aware firmware.
 
+### Next bench session checklist
+
+Follow these steps in order to investigate a failed battery-powered run. Do
+not connect computer USB while the battery converter is on.
+
+1. **Reproduce the failure with the same firmware mode/build that previously
+   failed.** Do not change firmware mode before reproducing it. Check that the
+   converter and cells are connected as usual, and note the displayed stage
+   or behavior when refresh stops. If convenient, note the board-input
+   voltage/minimum captured during the attempt.
+2. **Stop battery power safely.** Switch off the holder/converter and
+   disconnect the battery-powered USB-C cable. Do not attach computer USB
+   until the converter is off.
+3. **Read the persistent diagnostics.** Connect the board to the computer and
+   from the repository root run (outside any Python virtual environment, with
+   the hotspot password configured per the
+   [firmware README](../firmware/README.md#set-the-hotspot-password-once)):
+
+   ```sh
+   cd firmware
+   cargo --config .cargo/wifi.local.toml run --release --features usb
+   ```
+
+   This flashes/runs the USB development build. Normal application flashing
+   preserves NVS; do not erase NVS or use a full-chip erase.
+4. **Capture the boot output promptly.** Save the line beginning
+   `production safety NVS snapshot (read-only)` and the nearby lines for
+   `USB session reset reason`, `safety diagnostics: previous state`, and
+   `last recorded fault`. USB mode resets only its own `hof_usb` runtime
+   guard after logging it; the production `hof_safety` snapshot is read-only.
+5. **Interpret, don't overdiagnose.** `state=Some(161)` (`0xA1`, Working)
+   with phase `Display` means execution or power stopped during display work.
+   A `Brownout` reason means firmware rebooted and recorded that reset cause.
+   Neither result by itself proves the root cause. A clean state or missing
+   marker may mean this firmware did not persist the attempted work, or that
+   the failure happened outside the marked interval.
+6. **Record the evidence before changing wiring.** Copy the captured NVS
+   lines, note whether refresh stopped at the same point as before, and
+   include any minimum-voltage reading. Use that to decide whether the next
+   step is firmware/panel investigation or better transient/current
+   measurements.
+
+The USB development build performs real panel refreshes on its accelerated
+schedule; do not leave it running unattended. Disconnect power when finished.
+
 ## KiCad wiring model
 
 The generated project at [`kicad/hof_frame`](kicad/hof_frame) shows the
