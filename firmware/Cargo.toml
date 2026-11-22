@@ -20,6 +20,7 @@ test = false
 log = "0.4.35"
 png = "0.18.1"
 swash = "0.2.10"
+thiserror = "2.0.21"
 
 [build-dependencies]
 embuild = { version = "0.33.7", features = ["espidf"] }

@@ -105,20 +105,23 @@ pub fn receive_timed_out(
     now >= deadline || now.duration_since(last_data) >= inactivity
 }
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum ReceiveError {
-    Io(io::Error),
-    Storage(io::Error),
+    /// The client connection failed or timed out.
+    #[error("upload connection failed: {0}")]
+    Io(#[from] io::Error),
+    /// The staging destination failed to accept the body.
+    #[error("upload staging failed: {0}")]
+    Storage(#[source] io::Error),
+    /// The HTTP request is malformed or unsupported.
+    #[error("upload request is invalid")]
     InvalidRequest,
+    /// The body exceeds the upload size limit.
+    #[error("upload exceeds the size limit")]
     TooLarge,
+    /// The body is not a supported image format.
+    #[error("upload is not a supported image")]
     UnsupportedImage,
-}
-
-impl From<io::Error> for ReceiveError {
-    /// Preserve receive I/O failures separately from destination storage failures.
-    fn from(error: io::Error) -> Self {
-        Self::Io(error)
-    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

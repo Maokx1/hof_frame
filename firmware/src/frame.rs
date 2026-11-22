@@ -91,11 +91,19 @@ pub trait FrameStorage {
     fn write(&mut self, offset: usize, bytes: &[u8]) -> Result<(), Self::Error>;
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, thiserror::Error)]
 pub enum FrameError<E> {
-    Storage(E),
+    /// The backing storage failed to read, erase, or write.
+    #[error("frame storage failed: {0}")]
+    Storage(#[source] E),
+    /// The candidate pixels or metadata are not a valid frame.
+    #[error("frame pixels or metadata are invalid")]
     InvalidInput,
+    /// No newer generation number is available for another commit.
+    #[error("frame generation counter is exhausted")]
     GenerationExhausted,
+    /// The committed slot did not read back as written.
+    #[error("committed frame failed readback verification")]
     Verification,
 }
 

@@ -13,6 +13,16 @@ pub const PALETTE: [(u8, [i32; 3]); 6] = [
 ];
 const BAYER: [[i32; 4]; 4] = [[0, 8, 2, 10], [12, 4, 14, 6], [3, 11, 1, 9], [15, 7, 13, 5]];
 
+#[derive(Debug, PartialEq, Eq, thiserror::Error)]
+pub enum ConversionError {
+    /// The row, buffer, or channel count does not match the selected layout.
+    #[error("invalid conversion row dimensions")]
+    InvalidRow,
+    /// A layout pixel has no position on the native panel.
+    #[error("layout pixel ({x}, {y}) is outside the panel")]
+    OutsidePanel { x: usize, y: usize },
+}
+
 /// Return the source dimensions for the selected photo orientation.
 pub fn dimensions(orientation: Orientation) -> (usize, usize) {
     match orientation {
@@ -28,19 +38,19 @@ pub fn row(
     y: usize,
     pixels: &[u8],
     channels: usize,
-) -> Result<(), &'static str> {
+) -> Result<(), ConversionError> {
     let (width, height) = dimensions(orientation);
     if output.len() != FRAME_BYTES
         || y >= height
         || !(1..=4).contains(&channels)
         || pixels.len() != width * channels
     {
-        return Err("invalid conversion row dimensions");
+        return Err(ConversionError::InvalidRow);
     }
     for (x, pixel) in pixels.chunks_exact(channels).enumerate() {
         let color = pixel_color(pixel, channels, x, y);
-        let (native_x, native_y) =
-            frame::native_coordinates(orientation, x, y).expect("validated layout coordinates");
+        let (native_x, native_y) = frame::native_coordinates(orientation, x, y)
+            .ok_or(ConversionError::OutsidePanel { x, y })?;
         let index = native_y * frame::WIDTH + native_x;
         let byte = &mut output[index / 2];
         if index.is_multiple_of(2) {
@@ -67,14 +77,21 @@ fn pixel_color(pixel: &[u8], channels: usize, x: usize, y: usize) -> u8 {
             *value = (*value + (BAYER[y % 4][x % 4] * 2 - 15) * 4).clamp(0, 255);
         }
     }
+    nearest_palette_code(rgb)
+}
+
+/// Select the palette code closest to an RGB color, preferring earlier entries on ties.
+fn nearest_palette_code(rgb: [i32; 3]) -> u8 {
+    let distance =
+        |color: &[i32; 3]| -> i32 { rgb.iter().zip(color).map(|(a, b)| (a - b).pow(2)).sum() };
     PALETTE
         .iter()
-        .min_by_key(|(_, candidate)| {
-            rgb.iter()
-                .zip(candidate)
-                .map(|(a, b)| (a - b).pow(2))
-                .sum::<i32>()
+        .fold(PALETTE[0], |best, candidate| {
+            if distance(&candidate.1) < distance(&best.1) {
+                *candidate
+            } else {
+                best
+            }
         })
-        .expect("nonempty palette")
         .0
 }

@@ -116,9 +116,13 @@ pub trait SafetyStore {
     fn write(&mut self, value: u8) -> Result<(), Self::Error>;
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, thiserror::Error)]
 pub enum SafetyError<E> {
-    Storage(E),
+    /// The durable safety store failed to read or write.
+    #[error("safety storage failed: {0}")]
+    Storage(#[source] E),
+    /// The safety state does not permit this transition.
+    #[error("work is blocked by the safety state")]
     Blocked,
 }
 
