@@ -138,6 +138,16 @@ header .aside {
     font-size: .8rem;
 }
 
+#battery-status {
+    padding: 4px 8px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    color: #fde68a;
+    font-size: .8rem;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
 .field-heading {
     position: relative;
     width: fit-content;

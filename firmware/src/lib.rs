@@ -1,3 +1,4 @@
+pub mod battery;
 pub mod conversion;
 pub mod frame;
 pub mod gesture;

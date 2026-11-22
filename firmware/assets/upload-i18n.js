@@ -3,6 +3,7 @@ const translations = {
   'Czas połączenia z ramką': 'Frame connection time',
   'Czas na wysłanie zdjęcia': 'Time left to send your photo',
   'Po upływie czasu hotspot zostanie zamknięty.': 'The hotspot will close when time runs out.',
+  'Bateria:': 'Battery:',
   'Hall of Fame · biurowa galeria sław': 'Hall of Fame · office legends',
   'Bursztynek miesiąca.': 'Amber of the month.',
   'Podobno zasłużył.': 'Apparently, well deserved.',

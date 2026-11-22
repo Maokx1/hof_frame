@@ -160,6 +160,7 @@ pub fn run(
     boot: Instant,
     safety: &mut firmware::safety::SafetyGuard<crate::safety_nvs::NvsSafetyStore>,
     schedule: &mut firmware::schedule::RefreshSchedule,
+    battery_percentage: Option<u8>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let awake_deadline = boot + upload::AWAKE_TIMEOUT;
     let result = (|| -> Result<(), Box<dyn std::error::Error>> {
@@ -250,6 +251,13 @@ pub fn run(
                             )
                             .replace("/* __SCRIPT__ */", include_str!("../assets/upload.js"))
                             .replace("__SECONDS__", &remaining.to_string())
+                            .replace(
+                                "__BATTERY_PERCENTAGE__",
+                                &battery_percentage.map_or_else(
+                                    || "?".to_owned(),
+                                    |percentage| format!("~{percentage}"),
+                                ),
+                            )
                             .replace(
                                 "__PROCESS_TIMEOUT_MS__",
                                 &upload::BROWSER_RESULT_TIMEOUT.as_millis().to_string(),

@@ -1,5 +1,6 @@
 //! EE04 display bring-up with KEY0 gesture handling and scheduled deep sleep.
 
+mod battery;
 mod epd;
 mod frame_flash;
 mod image_decode;
@@ -56,6 +57,23 @@ extern "C" {
 fn rtc_time_us() -> u64 {
     // ESP-IDF's RTC clock continues across deep sleep, unlike esp_timer.
     unsafe { esp_rtc_get_time_us().max(0) as u64 }
+}
+
+fn read_battery_percentage(sensor: Option<&mut battery::BatterySensor<'_>>) -> Option<u8> {
+    let sensor = sensor?;
+    match sensor.read_percentage() {
+        Ok(Some(percentage)) => Some(percentage),
+        Ok(None) => {
+            log::warn!(
+                "battery reading outside the expected pack-voltage range; website will show ?%"
+            );
+            None
+        }
+        Err(error) => {
+            log::warn!("battery ADC read failed; website will show ?%: {error:?}");
+            None
+        }
+    }
 }
 
 fn retained_state() -> RetainedState {
@@ -490,6 +508,14 @@ fn main() {
             }
         }
     };
+    let mut battery_sensor =
+        match battery::BatterySensor::new(peripherals.adc1, peripherals.pins.gpio8) {
+            Ok(sensor) => Some(sensor),
+            Err(error) => {
+                log::warn!("battery ADC setup failed; website will show ?%: {error:?}");
+                None
+            }
+        };
     if let Err(error) = set_work_phase(&mut safety, WorkPhase::SafetyCleanup) {
         safety_storage_fault(error);
     }
@@ -504,7 +530,7 @@ fn main() {
         "upload development mode: MOCK deep sleep; USB stays connected; panel OFF, Wi-Fi OFF"
     );
     log::warn!("USB mode: REAL upload/manual/scheduled display; simulated deep sleep; timer=60 s from completion; manual limit=1 h; production remains 24 h / 1 h");
-    log::warn!("USB safety: simulated fault initially OFF; KEY1 toggles while idle; runtime safety namespace=hof_usb, state={:?}; production hof_safety untouched; KEY1 cannot clear real faults; battery unknown; USB power only", safety.state());
+    log::warn!("USB safety: simulated fault initially OFF; KEY1 toggles while idle; runtime safety namespace=hof_usb, state={:?}; production hof_safety untouched; KEY1 cannot clear real faults; battery estimate is display-only; USB power only", safety.state());
     let mut schedule = RefreshSchedule::new(rtc_time_us());
     let mut button_armed = false;
     let mut released_since = None;
@@ -566,8 +592,14 @@ fn main() {
                     if let Err(error) = safety.begin_work() {
                         safety_storage_fault(error);
                     }
-                    let result =
-                        upload_wifi::run(&mut upload_wifi, wake_at, &mut safety, &mut schedule);
+                    let battery_percentage = read_battery_percentage(battery_sensor.as_mut());
+                    let result = upload_wifi::run(
+                        &mut upload_wifi,
+                        wake_at,
+                        &mut safety,
+                        &mut schedule,
+                        battery_percentage,
+                    );
                     if let Err(error) = result {
                         log::error!("UploadWindow failed: {error:?}");
                         if let Err(latch_error) = safety.latch() {
@@ -670,6 +702,15 @@ fn main() {
             sleep_until_refresh(&button);
         }
         log::warn!("normal upload: REAL display and deep sleep; battery voltage guard is NOT qualified; stable bench power only");
+        let mut battery_sensor =
+            match battery::BatterySensor::new(peripherals.adc1, peripherals.pins.gpio8) {
+                Ok(sensor) => Some(sensor),
+                Err(error) => {
+                    log::warn!("battery ADC setup failed; website will show ?%: {error:?}");
+                    None
+                }
+            };
+        let battery_percentage = read_battery_percentage(battery_sensor.as_mut());
         if let Err(error) = safety.begin_work() {
             safety_storage_fault(error);
         }
@@ -679,7 +720,13 @@ fn main() {
             set_work_phase(&mut safety, WorkPhase::Setup)?;
             psram::verify()?;
             let mut wifi = upload_wifi::setup(peripherals.modem)?;
-            upload_wifi::run(&mut wifi, wake_at, &mut safety, &mut schedule)
+            upload_wifi::run(
+                &mut wifi,
+                wake_at,
+                &mut safety,
+                &mut schedule,
+                battery_percentage,
+            )
         })();
         match result {
             Ok(()) => {
