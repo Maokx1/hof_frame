@@ -207,6 +207,8 @@ fn refresh_saved_frame(
         .current
         .map(|record| record.metadata)
         .unwrap_or_default();
+    // NVS writes disable the flash cache; record the phase before overlay rendering.
+    set_work_phase(safety, WorkPhase::Display)?;
     if metadata.battery_indicator_enabled {
         log::info!("battery overlay: unknown (?%); calibrated measurement unavailable");
         log::info!(
@@ -221,8 +223,6 @@ fn refresh_saved_frame(
         log::error!("battery overlay rendering failed: {error}; panel remains OFF");
         EspError::from(esp_idf_svc::sys::ESP_ERR_INVALID_STATE).unwrap()
     })?;
-    // Keep NVS phase writes outside the mapped-frame lifetime.
-    set_work_phase(safety, WorkPhase::Display)?;
     if let Some(record) = scan.current {
         let mapped = storage.map(record)?;
         log::info!("rendering validated native-order frame: {record:?}; live status overlay");
