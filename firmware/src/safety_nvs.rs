@@ -1,12 +1,14 @@
+use crate::safety::{
+    self, Diagnostic, DiagnosticStore, FaultReason, SafetyError, SafetyGuard, SafetyStore,
+    WorkPhase,
+};
 use esp_idf_svc::nvs::{EspDefaultNvs, EspDefaultNvsPartition};
 use esp_idf_svc::sys::EspError;
-use firmware::safety::{
-    Diagnostic, DiagnosticStore, FaultReason, SafetyError, SafetyGuard, SafetyStore, WorkPhase,
-};
 
 pub struct NvsSafetyStore(EspDefaultNvs);
 
 impl NvsSafetyStore {
+    /// Load diagnostics, rejecting unsupported records instead of hiding them.
     fn diagnostic(&self) -> Result<Option<Diagnostic>, EspError> {
         let value = self.0.get_u32("diag_v1")?;
         match value {
@@ -18,6 +20,7 @@ impl NvsSafetyStore {
         }
     }
 
+    /// Record a fault at the last phase and preserve it as historical evidence.
     fn fault(&mut self, reason: FaultReason) -> Result<(), EspError> {
         let previous = self.diagnostic()?;
         let diagnostic = Diagnostic {
@@ -35,6 +38,7 @@ impl NvsSafetyStore {
 }
 
 impl DiagnosticStore for NvsSafetyStore {
+    /// Commit the current phase without altering safety permission.
     fn phase(&mut self, phase: WorkPhase) -> Result<(), EspError> {
         let diagnostic = Diagnostic {
             phase,
@@ -49,6 +53,7 @@ impl DiagnosticStore for NvsSafetyStore {
 impl SafetyStore for NvsSafetyStore {
     type Error = EspError;
 
+    /// Read and log the authoritative compatible safety byte.
     fn read(&mut self) -> Result<Option<u8>, EspError> {
         let value = self.0.get_u8("state_v1")?;
         match value {
@@ -63,6 +68,7 @@ impl SafetyStore for NvsSafetyStore {
         Ok(value)
     }
 
+    /// Commit safety state, recording a runtime fault before a new latch.
     fn write(&mut self, value: u8) -> Result<(), EspError> {
         if value == 0xA2 {
             let diagnostic = self.diagnostic()?;
@@ -76,6 +82,7 @@ impl SafetyStore for NvsSafetyStore {
     }
 }
 
+/// Open production recovery without automatic partition erasure or acknowledgement.
 pub fn open(
     namespace: &str,
     brownout: bool,
@@ -83,28 +90,31 @@ pub fn open(
     open_store(namespace, brownout, false)
 }
 
-#[cfg(feature = "usb")]
-pub fn open_usb_session(
-    brownout: bool,
-) -> Result<SafetyGuard<NvsSafetyStore>, SafetyError<EspError>> {
-    open_store("hof_usb", brownout, true)
+usb_items! {
+    /// Start a fresh development session in the isolated USB namespace.
+    pub fn open_usb_session(
+        brownout: bool,
+    ) -> Result<SafetyGuard<NvsSafetyStore>, SafetyError<EspError>> {
+        open_store("hof_usb", brownout, true)
+    }
+
+    /// Log production fault evidence read-only without clearing or recovering it.
+    pub fn log_production_diagnostics() -> Result<(), EspError> {
+        let partition = EspDefaultNvsPartition::take_with(false)?;
+        let nvs = EspDefaultNvs::new(partition, "hof_safety", false)?;
+        let state = nvs.get_u8("state_v1")?;
+        let diagnostic = nvs.get_u32("diag_v1")?;
+        let last_fault = nvs.get_u32("last_fault_v1")?;
+        log::info!(
+            "production safety NVS snapshot (read-only): state={state:?}, diag_v1 raw={diagnostic:?} decoded={:?}, last_fault_v1 raw={last_fault:?} decoded={:?}",
+            diagnostic.and_then(Diagnostic::from_record),
+            last_fault.and_then(Diagnostic::from_record)
+        );
+        Ok(())
+    }
 }
 
-#[cfg(feature = "usb")]
-pub fn log_production_diagnostics() -> Result<(), EspError> {
-    let partition = EspDefaultNvsPartition::take_with(false)?;
-    let nvs = EspDefaultNvs::new(partition, "hof_safety", false)?;
-    let state = nvs.get_u8("state_v1")?;
-    let diagnostic = nvs.get_u32("diag_v1")?;
-    let last_fault = nvs.get_u32("last_fault_v1")?;
-    log::info!(
-        "production safety NVS snapshot (read-only): state={state:?}, diag_v1 raw={diagnostic:?} decoded={:?}, last_fault_v1 raw={last_fault:?} decoded={:?}",
-        diagnostic.and_then(Diagnostic::from_record),
-        last_fault.and_then(Diagnostic::from_record)
-    );
-    Ok(())
-}
-
+/// Load diagnostic history, infer boot faults, and apply only explicit USB recovery.
 fn open_store(
     namespace: &str,
     brownout: bool,
@@ -130,7 +140,7 @@ fn open_store(
             log::warn!("safety diagnostics: last recorded fault={diagnostic:?}; no wall-clock timestamp");
         }
     }
-    let reason = firmware::safety::boot_fault(previous_state, brownout);
+    let reason = safety::boot_fault(previous_state, brownout);
     if let Some(reason) = reason {
         store.fault(reason).map_err(SafetyError::Storage)?;
     }

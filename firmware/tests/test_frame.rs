@@ -1,9 +1,9 @@
-use super::*;
+use firmware::frame::*;
 
 #[test]
 fn n16r8_partition_budget_supports_seven_mb_and_preserves_frames() {
     let mut previous_end = 0x9000;
-    for line in include_str!("../../partitions.csv").lines() {
+    for line in include_str!("../partitions.csv").lines() {
         if line.starts_with('#') || line.is_empty() {
             continue;
         }
@@ -17,7 +17,7 @@ fn n16r8_partition_budget_supports_seven_mb_and_preserves_frames() {
             "nvs" => assert_eq!(size, 24 * 1024),
             "upload" => {
                 assert_eq!(size, 7 * 1024 * 1024);
-                assert!(size >= crate::upload::MAX_UPLOAD_BYTES);
+                assert!(size >= firmware::upload::MAX_UPLOAD_BYTES);
             }
             "frames" => {
                 assert_eq!(offset, 0xe00000);

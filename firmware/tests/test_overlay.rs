@@ -1,4 +1,5 @@
-use super::*;
+use firmware::frame::{self, Corner, Metadata, Orientation};
+use firmware::overlay::*;
 
 fn enabled_metadata() -> Metadata {
     Metadata {
@@ -25,7 +26,7 @@ fn all_corners_follow_layout_rotation_and_exact_margins() {
                 None,
             )
             .unwrap();
-            let (width, height) = crate::conversion::dimensions(orientation);
+            let (width, height) = firmware::conversion::dimensions(orientation);
             let left = if matches!(battery_corner, Corner::TopLeft | Corner::BottomLeft) {
                 MARGIN
             } else {

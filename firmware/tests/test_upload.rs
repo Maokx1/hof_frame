@@ -1,5 +1,8 @@
-use super::*;
+use firmware::frame::{Corner, Orientation};
+use firmware::upload::*;
 use std::io::Cursor;
+use std::io::{self, Write};
+use std::time::Duration;
 
 #[test]
 fn progress_response_uses_chunked_framing_and_flushes_each_stage() {

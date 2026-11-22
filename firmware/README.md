@@ -91,6 +91,40 @@ CI, exporting `HOF_WIFI_PASSWORD` still works without a local config file.
 Former save-only, display-only, battery-preview, and USB-bench feature names
 have been removed. Use `usb` instead. All automated host tests remain.
 
+## Reading the source
+
+[main.rs](src/main.rs) only boots the application and advances its states.
+Start there, then follow the selected mode's handlers:
+
+- [app/production.rs](src/app/production.rs): dispatch one wake cycle, perform
+  requested work, and prepare real deep sleep.
+- [app/usb.rs](src/app/usb.rs): idle polling, gesture classification, upload,
+  refresh, and simulated sleep. KEY1 is sampled only in the idle state.
+- [dispatch.rs](src/dispatch.rs): pure work-selection rules. Time, safety,
+  gestures, and mode-specific blocking are supplied by the caller.
+- [work.rs](src/work.rs), [rtc.rs](src/rtc.rs), and
+  [buttons.rs](src/buttons.rs): durable safety boundaries, retained scheduling,
+  GPIO sampling, and sleep preparation.
+- [upload_wifi.rs](src/upload_wifi.rs): bounded HTTP transport, independent
+  request handlers, retry/result handling, and unconditional radio cleanup.
+  [pipeline.rs](src/pipeline.rs) coordinates verified save and display;
+  [image_decode.rs](src/image_decode.rs) handles decode and commit verification.
+- [display.rs](src/display.rs): validated frame loading, overlay composition,
+  display outcomes, and ordered power/SPI cleanup.
+  [epd.rs](src/epd.rs) contains only panel-driver operations.
+
+Pure transformations and decisions remain in the host-testable library:
+gestures, dispatch, scheduling, conversion, overlay layout, frame validation,
+and HTTP parsing. Hardware adapters own side effects. Existing storage traits
+and decoder checkpoints provide extension points without introducing a
+general-purpose framework. Functions have Rust `///` documentation describing
+their responsibilities and important constraints.
+
+The refactor does not change the operating modes, timing limits, stored record
+formats, retry policy, or safety qualification requirements. In particular,
+panel cleanup still runs before durable Clean, and an accepted upload continues
+processing if the browser disconnects.
+
 ## Buttons and USB simulated fault
 
 The EE04 user buttons KEY0/GPIO2, KEY1/GPIO3, and KEY2/GPIO5 are active-low
@@ -430,19 +464,18 @@ USB testing), using your normal ESP-IDF environment and build-time password.
 
 ```sh
 cd firmware
-cargo +stable test --lib --target x86_64-unknown-linux-gnu
+cargo +stable test --tests --target x86_64-unknown-linux-gnu
 python3 -c 'import sys; assert sys.prefix == sys.base_prefix, "Leave the Python virtual environment before building ESP-IDF"'
 cargo --config .cargo/wifi.local.toml build --release
 cargo --config .cargo/wifi.local.toml build --release --features usb
 cargo fmt -- --check
 ```
 
-All firmware test code lives in [tests/unit](tests/unit), loaded as unit-test
-modules so tests can check private internals without exposing them as public API.
-The main Cargo manifest runs the host tests; no separate test crate is needed.
+Firmware integration tests live in [tests](tests) as `test_<module>.rs`.
+Cargo discovers each file automatically; tests access the library's public API.
 Use your host target triple instead of `x86_64-unknown-linux-gnu` on other platforms.
-`--lib` excludes the hardware-only binary, and ESP-IDF dependencies and build
-setup apply only to the embedded target.
+The host binary reports that firmware requires ESP-IDF if run; ESP-IDF
+dependencies and build setup apply only to the embedded target.
 CI workflows live in the repository-root [.github/workflows](../.github/workflows)
 and run host tests as well as embedded checks.
 

@@ -1,9 +1,11 @@
-use super::*;
+use firmware::png_decode::*;
+use firmware::{conversion, frame};
+use std::io::Cursor;
 
 #[test]
 fn qualification_signature_only_upload_is_rejected_before_pixel_conversion() {
     let encoded = b"\x89PNG\r\n\x1a\n";
-    assert!(crate::upload::image_signature(encoded));
+    assert!(firmware::upload::image_signature(encoded));
     let mut packed = vec![0x11; frame::FRAME_BYTES];
     assert!(decode(encoded, frame::Metadata::default(), &mut packed, || Ok(())).is_err());
     assert!(packed.iter().all(|byte| *byte == 0x11));
@@ -93,7 +95,7 @@ fn decodes_photo_sized_rgb_with_inflater_workspace() {
         &pixels,
     );
     assert!(encoded.len() > width * height * 2);
-    assert!(encoded.len() <= crate::upload::MAX_UPLOAD_BYTES);
+    assert!(encoded.len() <= firmware::upload::MAX_UPLOAD_BYTES);
     let mut output = vec![0; frame::FRAME_BYTES];
     decode(&encoded, Default::default(), &mut output, || Ok(())).unwrap();
     assert!(frame::valid_pixels(&output));
@@ -119,7 +121,7 @@ fn streams_exact_seven_mb_png_and_rejects_one_more_before_conversion() {
     );
     assert!(encoded.len() > width * height * 2);
     let end = encoded.split_off(encoded.len() - 12);
-    let padding = crate::upload::MAX_UPLOAD_BYTES - encoded.len() - end.len() - 12;
+    let padding = firmware::upload::MAX_UPLOAD_BYTES - encoded.len() - end.len() - 12;
     encoded.extend_from_slice(&(padding as u32).to_be_bytes());
     let chunk_start = encoded.len();
     encoded.extend_from_slice(b"tEXt");

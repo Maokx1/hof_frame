@@ -15,6 +15,7 @@ pub struct FlashUpload {
 }
 
 impl FlashUpload {
+    /// Open staging at offset zero and verify its configured upload capacity.
     pub fn open(deadline: Instant) -> Result<Self, EspError> {
         let partition = unsafe {
             sys::esp_partition_find_first(
@@ -25,7 +26,7 @@ impl FlashUpload {
         };
         let partition = NonNull::new(partition.cast_mut())
             .ok_or_else(|| EspError::from(sys::ESP_ERR_NOT_FOUND).unwrap())?;
-        if (unsafe { partition.as_ref().size } as usize) < firmware::upload::MAX_UPLOAD_BYTES {
+        if (unsafe { partition.as_ref().size } as usize) < crate::upload::MAX_UPLOAD_BYTES {
             log::error!("Upload partition too small; flash the updated partition table");
             return Err(EspError::from(sys::ESP_ERR_INVALID_SIZE).unwrap());
         }
@@ -37,6 +38,7 @@ impl FlashUpload {
         })
     }
 
+    /// Reject staging operations that exceed the transfer deadline.
     fn check_deadline(&self) -> io::Result<()> {
         if Instant::now() >= self.deadline {
             return Err(io::Error::new(
@@ -47,6 +49,7 @@ impl FlashUpload {
         Ok(())
     }
 
+    /// Create a seekable bounded reader for the completed encoded body.
     pub fn reader(&self, deadline: Instant) -> BufReader<UploadReader<'_>> {
         BufReader::with_capacity(
             SECTOR_BYTES,
@@ -61,9 +64,10 @@ impl FlashUpload {
 }
 
 impl Write for FlashUpload {
+    /// Append bytes, erasing sectors on demand and enforcing body capacity.
     fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
         self.check_deadline()?;
-        if bytes.len() > firmware::upload::MAX_UPLOAD_BYTES - self.len {
+        if bytes.len() > crate::upload::MAX_UPLOAD_BYTES - self.len {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "upload flash capacity exceeded",
@@ -104,6 +108,7 @@ impl Write for FlashUpload {
         Ok(bytes.len())
     }
 
+    /// Writes are synchronous, so no buffered staging bytes remain to flush.
     fn flush(&mut self) -> io::Result<()> {
         Ok(())
     }
@@ -117,6 +122,7 @@ pub struct UploadReader<'a> {
 }
 
 impl Read for UploadReader<'_> {
+    /// Read only the received body, enforcing the decode/read deadline.
     fn read(&mut self, bytes: &mut [u8]) -> io::Result<usize> {
         if Instant::now() >= self.deadline {
             return Err(io::Error::new(
@@ -150,6 +156,7 @@ impl Read for UploadReader<'_> {
 }
 
 impl Seek for UploadReader<'_> {
+    /// Move the encoded-body cursor without accepting negative or overflowing offsets.
     fn seek(&mut self, from: SeekFrom) -> io::Result<u64> {
         let position = match from {
             SeekFrom::Start(position) => i64::try_from(position).ok(),

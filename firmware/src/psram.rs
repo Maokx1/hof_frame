@@ -10,6 +10,7 @@ pub struct PsramBuffer {
 }
 
 impl PsramBuffer {
+    /// Allocate and initialize bytes explicitly in external PSRAM.
     pub fn new(len: usize) -> Result<Self, EspError> {
         let caps = sys::MALLOC_CAP_SPIRAM | sys::MALLOC_CAP_8BIT;
         let pointer = NonNull::new(unsafe { sys::heap_caps_malloc(len, caps) }.cast::<u8>())
@@ -19,17 +20,20 @@ impl PsramBuffer {
         Ok(Self { pointer, len })
     }
 
+    /// Borrow the initialized allocation for decoding or verification.
     pub fn bytes_mut(&mut self) -> &mut [u8] {
         unsafe { std::slice::from_raw_parts_mut(self.pointer.as_ptr(), self.len) }
     }
 }
 
 impl Drop for PsramBuffer {
+    /// Return the allocation to ESP-IDF's capability-aware heap.
     fn drop(&mut self) {
         unsafe { sys::heap_caps_free(self.pointer.as_ptr().cast()) };
     }
 }
 
+/// Verify physical PSRAM and Rust heap growth while large allocations coexist.
 pub fn verify() -> Result<(), EspError> {
     let started = Instant::now();
     let caps = sys::MALLOC_CAP_SPIRAM | sys::MALLOC_CAP_8BIT;
@@ -41,8 +45,20 @@ pub fn verify() -> Result<(), EspError> {
         return Err(EspError::from(sys::ESP_ERR_INVALID_SIZE).unwrap());
     }
     let mut buffer = PsramBuffer::new(4 * 1024 * 1024)?;
+    verify_bytes(buffer.bytes_mut())?;
+    verify_decoder_heap()?;
+    drop(buffer);
+    log::info!(
+        "PSRAM: PASS; explicit 4194304-byte allocation write/read verified; buffer released; elapsed={} ms",
+        started.elapsed().as_millis()
+    );
+    Ok(())
+}
+
+/// Write and read every physical byte, yielding every 64 KiB.
+fn verify_bytes(buffer: &mut [u8]) -> Result<(), EspError> {
     // Volatile access makes this a physical RAM check, not an optimized comparison.
-    for (block, bytes) in buffer.bytes_mut().chunks_mut(4096).enumerate() {
+    for (block, bytes) in buffer.chunks_mut(4096).enumerate() {
         for (index, byte) in bytes.iter_mut().enumerate() {
             unsafe {
                 std::ptr::write_volatile(byte, (block as u8).wrapping_mul(31) ^ index as u8);
@@ -53,7 +69,7 @@ pub fn verify() -> Result<(), EspError> {
             FreeRtos::delay_ms(1);
         }
     }
-    for (block, bytes) in buffer.bytes_mut().chunks(4096).enumerate() {
+    for (block, bytes) in buffer.chunks(4096).enumerate() {
         for (index, byte) in bytes.iter().enumerate() {
             if unsafe { std::ptr::read_volatile(byte) }
                 != ((block as u8).wrapping_mul(31) ^ index as u8)
@@ -65,17 +81,12 @@ pub fn verify() -> Result<(), EspError> {
             FreeRtos::delay_ms(1);
         }
     }
-    verify_decoder_heap()?;
-    drop(buffer);
-    log::info!(
-        "PSRAM: PASS; explicit 4194304-byte allocation write/read verified; buffer released; elapsed={} ms",
-        started.elapsed().as_millis()
-    );
     Ok(())
 }
 
+/// Ensure Rust Vec allocation/growth stays external and preserves existing bytes.
 fn verify_decoder_heap() -> Result<(), EspError> {
-    let _candidate = PsramBuffer::new(firmware::frame::FRAME_BYTES)?;
+    let _candidate = PsramBuffer::new(crate::frame::FRAME_BYTES)?;
     let mut workspace = Vec::<u8>::new();
     workspace.try_reserve_exact(128 * 1024).map_err(|error| {
         log::error!("PSRAM: Rust decoder heap allocation failed: {error}");

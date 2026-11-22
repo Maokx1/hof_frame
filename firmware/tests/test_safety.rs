@@ -1,4 +1,4 @@
-use super::*;
+use firmware::safety::*;
 
 #[derive(Default)]
 struct Store {

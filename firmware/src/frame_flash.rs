@@ -2,9 +2,9 @@ use std::marker::PhantomData;
 use std::ptr::NonNull;
 use std::time::Instant;
 
+use crate::frame::{self, FrameRecord, FrameStorage, Scan, STORAGE_BYTES};
 use esp_idf_svc::hal::delay::FreeRtos;
 use esp_idf_svc::sys::{self, esp, EspError};
-use firmware::frame::{self, FrameRecord, FrameStorage, Scan, STORAGE_BYTES};
 
 pub struct FlashFrames {
     partition: NonNull<sys::esp_partition_t>,
@@ -13,6 +13,7 @@ pub struct FlashFrames {
 }
 
 impl FlashFrames {
+    /// Open only the expected two-slot frames partition.
     pub fn open() -> Result<Self, EspError> {
         let partition = unsafe {
             sys::esp_partition_find_first(
@@ -33,10 +34,12 @@ impl FlashFrames {
         })
     }
 
+    /// Bound subsequent storage operations by the upload's awake budget.
     pub fn set_deadline(&mut self, deadline: Instant) {
         self.deadline = Some(deadline);
     }
 
+    /// Reject operations that start after the configured deadline.
     fn check_deadline(&self) -> Result<(), EspError> {
         if self
             .deadline
@@ -47,6 +50,7 @@ impl FlashFrames {
         Ok(())
     }
 
+    /// Yield after a bounded number of small storage operations.
     fn yield_periodically(&mut self) {
         self.operations += 1;
         if self.operations == 16 {
@@ -55,6 +59,7 @@ impl FlashFrames {
         }
     }
 
+    /// Scan both slots and log validation/fallback decisions.
     pub fn load(&mut self) -> Result<Scan, frame::FrameError<EspError>> {
         let result = frame::scan(self)?;
         for (slot, status) in result.slots.iter().enumerate() {
@@ -71,6 +76,7 @@ impl FlashFrames {
         Ok(result)
     }
 
+    /// Borrow a validated payload read-only until the mapping is dropped.
     pub fn map(&self, record: FrameRecord) -> Result<MappedFrame<'_>, EspError> {
         if record.slot >= 2 {
             return Err(EspError::from(sys::ESP_ERR_INVALID_ARG).unwrap());
@@ -98,6 +104,7 @@ impl FlashFrames {
 impl FrameStorage for FlashFrames {
     type Error = EspError;
 
+    /// Read partition bytes under the storage deadline.
     fn read(&mut self, offset: usize, bytes: &mut [u8]) -> Result<(), EspError> {
         self.check_deadline()?;
         unsafe {
@@ -112,6 +119,7 @@ impl FrameStorage for FlashFrames {
         Ok(())
     }
 
+    /// Erase one sector at a time, checking the deadline between sectors.
     fn erase(&mut self, offset: usize, len: usize) -> Result<(), EspError> {
         for sector in (offset..offset + len).step_by(4096) {
             self.check_deadline()?;
@@ -127,6 +135,7 @@ impl FrameStorage for FlashFrames {
         Ok(())
     }
 
+    /// Write partition bytes and yield to the RTOS.
     fn write(&mut self, offset: usize, bytes: &[u8]) -> Result<(), EspError> {
         self.check_deadline()?;
         unsafe {
@@ -149,6 +158,7 @@ pub struct MappedFrame<'a> {
 }
 
 impl MappedFrame<'_> {
+    /// Borrow native packed pixels without copying them into RAM.
     pub fn bytes(&self) -> &[u8] {
         // The immutable storage borrow prevents erasing/writing while mapped.
         unsafe { std::slice::from_raw_parts(self.pointer, frame::FRAME_BYTES) }
@@ -156,6 +166,7 @@ impl MappedFrame<'_> {
 }
 
 impl Drop for MappedFrame<'_> {
+    /// Release the flash mapping before any subsequent NVS/storage writes.
     fn drop(&mut self) {
         unsafe { sys::esp_partition_munmap(self.handle) };
     }

@@ -1,4 +1,5 @@
-use super::*;
+use firmware::panel_busy::*;
+use std::time::Duration;
 
 #[test]
 fn initial_idle_is_not_a_completed_refresh() {

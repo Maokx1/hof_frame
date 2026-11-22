@@ -1,7 +1,7 @@
 use std::time::Instant;
 
+use crate::{frame, png_decode};
 use esp_idf_svc::hal::delay::FreeRtos;
-use firmware::{frame, png_decode};
 
 use crate::frame_flash::FlashFrames;
 use crate::psram::PsramBuffer;
@@ -12,14 +12,15 @@ pub enum PipelineError {
     Fault(String),
 }
 
+/// Decode into a bounded candidate, then publish and verify an inactive frame slot.
 pub fn save(
     encoded: impl std::io::BufRead + std::io::Seek,
     encoded_len: usize,
     metadata: frame::Metadata,
     deadline: Instant,
-    safety: &mut firmware::safety::SafetyGuard<crate::safety_nvs::NvsSafetyStore>,
+    safety: &mut crate::safety::SafetyGuard<crate::safety_nvs::NvsSafetyStore>,
 ) -> Result<(), PipelineError> {
-    crate::set_work_phase(safety, firmware::safety::WorkPhase::Decode)
+    crate::work::set_phase(safety, crate::safety::WorkPhase::Decode)
         .map_err(|error| PipelineError::Fault(error.to_string()))?;
     log::info!(
         "Upload pipeline: decoding {} encoded bytes by rows; {metadata:?}; AP ON; panel OFF",
@@ -27,6 +28,21 @@ pub fn save(
     );
     let mut packed = PsramBuffer::new(frame::FRAME_BYTES)
         .map_err(|error| PipelineError::Fault(error.to_string()))?;
+    log_decoder_heap();
+    decode(encoded, encoded_len, metadata, packed.bytes_mut(), deadline)?;
+    if Instant::now() >= deadline {
+        return Err(PipelineError::Rejected("commit deadline exceeded".into()));
+    }
+    log::info!(
+        "Upload pipeline: conversion complete; committing 960000 packed bytes to inactive slot"
+    );
+    crate::work::set_phase(safety, crate::safety::WorkPhase::Save)
+        .map_err(|error| PipelineError::Fault(error.to_string()))?;
+    commit(packed.bytes_mut(), metadata, deadline)
+}
+
+/// Log both memory pools before invoking the row decoder.
+fn log_decoder_heap() {
     let internal_caps = esp_idf_svc::sys::MALLOC_CAP_INTERNAL | esp_idf_svc::sys::MALLOC_CAP_8BIT;
     let external_caps = esp_idf_svc::sys::MALLOC_CAP_SPIRAM | esp_idf_svc::sys::MALLOC_CAP_8BIT;
     log::info!(
@@ -36,7 +52,17 @@ pub fn save(
         unsafe { esp_idf_svc::sys::heap_caps_get_free_size(external_caps) },
         unsafe { esp_idf_svc::sys::heap_caps_get_largest_free_block(external_caps) },
     );
-    png_decode::decode_reader(encoded, encoded_len, metadata, packed.bytes_mut(), || {
+}
+
+/// Convert by rows and distinguish invalid input from staging read faults.
+fn decode(
+    encoded: impl std::io::BufRead + std::io::Seek,
+    encoded_len: usize,
+    metadata: frame::Metadata,
+    packed: &mut [u8],
+    deadline: Instant,
+) -> Result<(), PipelineError> {
+    png_decode::decode_reader(encoded, encoded_len, metadata, packed, || {
         if Instant::now() >= deadline {
             return Err("decode/conversion deadline exceeded");
         }
@@ -53,19 +79,19 @@ pub fn save(
             PipelineError::Fault(format!("upload flash read failed: {io}"))
         }
         _ => PipelineError::Rejected(error),
-    })?;
-    if Instant::now() >= deadline {
-        return Err(PipelineError::Rejected("commit deadline exceeded".into()));
-    }
-    log::info!(
-        "Upload pipeline: conversion complete; committing 960000 packed bytes to inactive slot"
-    );
-    crate::set_work_phase(safety, firmware::safety::WorkPhase::Save)
-        .map_err(|error| PipelineError::Fault(error.to_string()))?;
+    })
+}
+
+/// Publish a candidate only after readback and ensure reload selects that record.
+fn commit(
+    packed: &[u8],
+    metadata: frame::Metadata,
+    deadline: Instant,
+) -> Result<(), PipelineError> {
     let mut storage =
         FlashFrames::open().map_err(|error| PipelineError::Fault(error.to_string()))?;
     storage.set_deadline(deadline);
-    let record = frame::commit(&mut storage, packed.bytes_mut(), metadata)
+    let record = frame::commit(&mut storage, packed, metadata)
         .map_err(|error| PipelineError::Fault(format!("frame commit failed: {error:?}")))?;
     let selected = storage
         .load()

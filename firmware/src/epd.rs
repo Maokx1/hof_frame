@@ -7,10 +7,10 @@ use std::ptr;
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 
-use esp_idf_svc::sys::{self, esp, EspError};
-use firmware::panel_busy::{
+use crate::panel_busy::{
     BusyTimeout, RefreshBusy, ASSERT_TIMEOUT, COMPLETE_TIMEOUT, MIN_WAVEFORM_BUSY,
 };
+use esp_idf_svc::sys::{self, esp, EspError};
 
 pub const WIDTH: usize = 800;
 pub const HEIGHT: usize = 480;
@@ -65,14 +65,17 @@ pub struct Epd {
     spi: sys::spi_device_handle_t,
 }
 
+/// Construct the driver's standard BUSY timeout error.
 fn timeout_error() -> EspError {
     EspError::from(sys::ESP_ERR_TIMEOUT).expect("ESP_ERR_TIMEOUT is not ESP_OK")
 }
 
+/// Set an already configured GPIO to its command/data/power level.
 fn set_level(pin: i32, high: bool) {
     unsafe { sys::gpio_set_level(pin, high as u32) };
 }
 
+/// Reset a GPIO and configure its initial output level.
 fn output_pin(pin: i32, initial_high: bool) -> Result<(), EspError> {
     unsafe {
         esp!(sys::gpio_reset_pin(pin))?;
@@ -86,6 +89,7 @@ fn output_pin(pin: i32, initial_high: bool) -> Result<(), EspError> {
 }
 
 impl Epd {
+    /// Cut the EE04 panel rail without waiting for the controller.
     pub fn disable_panel_power() -> Result<(), EspError> {
         output_pin(PIN_PANEL_ENABLE, false)
     }
@@ -96,6 +100,16 @@ impl Epd {
         output_pin(PIN_DC, true)?;
         output_pin(PIN_RST, true)?;
         output_pin(PIN_PANEL_ENABLE, true)?;
+        Self::configure_busy_pin()?;
+        let spi = Self::open_spi()?;
+        sleep(Duration::from_millis(50));
+        let epd = Self { spi };
+        epd.hardware_reset();
+        Ok(epd)
+    }
+
+    /// Configure active-low BUSY as a floating input.
+    fn configure_busy_pin() -> Result<(), EspError> {
         unsafe {
             esp!(sys::gpio_reset_pin(PIN_BUSY))?;
             esp!(sys::gpio_set_direction(
@@ -107,7 +121,11 @@ impl Epd {
                 sys::gpio_pull_mode_t_GPIO_FLOATING
             ))?;
         }
+        Ok(())
+    }
 
+    /// Initialize the SPI bus/device, releasing the bus on device setup failure.
+    fn open_spi() -> Result<sys::spi_device_handle_t, EspError> {
         let mut bus: sys::spi_bus_config_t = unsafe { std::mem::zeroed() };
         bus.__bindgen_anon_1.mosi_io_num = PIN_MOSI;
         bus.__bindgen_anon_2.miso_io_num = -1;
@@ -145,12 +163,10 @@ impl Epd {
             }
         }
 
-        sleep(Duration::from_millis(50));
-        let epd = Self { spi };
-        epd.hardware_reset();
-        Ok(epd)
+        Ok(spi)
     }
 
+    /// Pulse the controller's hardware reset pin.
     fn hardware_reset(&self) {
         set_level(PIN_RST, false);
         sleep(Duration::from_millis(20));
@@ -158,6 +174,7 @@ impl Epd {
         sleep(Duration::from_millis(10));
     }
 
+    /// Transmit one bounded SPI transaction.
     fn transfer(&self, bytes: &[u8]) -> Result<(), EspError> {
         if bytes.is_empty() {
             return Ok(());
@@ -172,6 +189,7 @@ impl Epd {
         esp!(unsafe { sys::spi_device_transmit(self.spi, &mut trans) })
     }
 
+    /// Select the controller and send a command before switching to data mode.
     fn begin_command(&self, command: u8) -> Result<(), EspError> {
         set_level(PIN_CS, false);
         set_level(PIN_DC, false);
@@ -183,6 +201,7 @@ impl Epd {
         Ok(())
     }
 
+    /// Send a command/data pair and release chip select even on failure.
     fn write_command(&self, command: u8, data: &[u8]) -> Result<(), EspError> {
         self.begin_command(command)?;
         let result = self.transfer(data);
@@ -190,6 +209,7 @@ impl Epd {
         result
     }
 
+    /// Wait for controller idle with the setup/power-operation timeout.
     fn wait_busy_high(&self) -> Result<(), EspError> {
         let start = Instant::now();
         while unsafe { sys::gpio_get_level(PIN_BUSY) } == 0 {
@@ -205,6 +225,7 @@ impl Epd {
         Ok(())
     }
 
+    /// Require a complete, plausible BUSY waveform rather than initial idle.
     fn wait_refresh_complete(&self) -> Result<(), EspError> {
         let start = Instant::now();
         let mut busy = RefreshBusy::default();
@@ -226,23 +247,7 @@ impl Epd {
                     }
                 }
                 Err(reason) => {
-                    match reason {
-                        BusyTimeout::NeverAsserted => log::error!(
-                            "ED2208 waveform did not assert BUSY within {} s (GPIO{PIN_BUSY} stayed HIGH); \
-                             refresh NOT confirmed; check panel power, cable and SPI/reset wiring",
-                            ASSERT_TIMEOUT.as_secs()
-                        ),
-                        BusyTimeout::NeverCompleted => log::error!(
-                            "ED2208 waveform BUSY did not return idle within {} s",
-                            COMPLETE_TIMEOUT.as_secs()
-                        ),
-                        BusyTimeout::ImplausiblyShort => log::error!(
-                            "ED2208 waveform ended after {} ms; BUSY LOW for less than {} ms; \
-                             refresh NOT confirmed; no automatic retry",
-                            start.elapsed().as_millis(),
-                            MIN_WAVEFORM_BUSY.as_millis()
-                        ),
-                    }
+                    self.log_busy_timeout(reason, start.elapsed());
                     return Err(timeout_error());
                 }
             }
@@ -250,6 +255,28 @@ impl Epd {
         }
     }
 
+    /// Explain why the waveform could not be confirmed without retrying it.
+    fn log_busy_timeout(&self, reason: BusyTimeout, elapsed: Duration) {
+        match reason {
+            BusyTimeout::NeverAsserted => log::error!(
+                "ED2208 waveform did not assert BUSY within {} s (GPIO{PIN_BUSY} stayed HIGH); \
+                             refresh NOT confirmed; check panel power, cable and SPI/reset wiring",
+                ASSERT_TIMEOUT.as_secs()
+            ),
+            BusyTimeout::NeverCompleted => log::error!(
+                "ED2208 waveform BUSY did not return idle within {} s",
+                COMPLETE_TIMEOUT.as_secs()
+            ),
+            BusyTimeout::ImplausiblyShort => log::error!(
+                "ED2208 waveform ended after {} ms; BUSY LOW for less than {} ms; \
+                             refresh NOT confirmed; no automatic retry",
+                elapsed.as_millis(),
+                MIN_WAVEFORM_BUSY.as_millis()
+            ),
+        }
+    }
+
+    /// Reset the controller, apply the profile, and power on its waveform engine.
     pub fn init(&self) -> Result<(), EspError> {
         self.hardware_reset();
         for (command, data) in INIT_SEQUENCE {
@@ -298,6 +325,7 @@ impl Epd {
         result
     }
 
+    /// Disable panel power and attempt both device removal and bus release.
     pub fn close(self) -> Result<(), EspError> {
         set_level(PIN_PANEL_ENABLE, false);
         let remove_result = unsafe { esp!(sys::spi_bus_remove_device(self.spi)) };

@@ -1,6 +1,9 @@
+//! Image conversion utilities to match display panel requirements.
+
 use crate::frame::{self, Orientation, FRAME_BYTES};
 
-const PALETTE: [(u8, [i32; 3]); 6] = [
+/// Native panel codes and their RGB colors.
+pub const PALETTE: [(u8, [i32; 3]); 6] = [
     (0, [0, 0, 0]),
     (1, [255, 255, 255]),
     (2, [255, 255, 0]),
@@ -10,6 +13,7 @@ const PALETTE: [(u8, [i32; 3]); 6] = [
 ];
 const BAYER: [[i32; 4]; 4] = [[0, 8, 2, 10], [12, 4, 14, 6], [3, 11, 1, 9], [15, 7, 13, 5]];
 
+/// Return the source dimensions for the selected photo orientation.
 pub fn dimensions(orientation: Orientation) -> (usize, usize) {
     match orientation {
         Orientation::Portrait => (frame::HEIGHT, frame::WIDTH),
@@ -17,6 +21,7 @@ pub fn dimensions(orientation: Orientation) -> (usize, usize) {
     }
 }
 
+/// Composite/dither one source row and pack it into native panel coordinates.
 pub fn row(
     output: &mut [u8],
     orientation: Orientation,
@@ -33,29 +38,7 @@ pub fn row(
         return Err("invalid conversion row dimensions");
     }
     for (x, pixel) in pixels.chunks_exact(channels).enumerate() {
-        let alpha = if channels == 2 || channels == 4 {
-            i32::from(pixel[channels - 1])
-        } else {
-            255
-        };
-        let mut rgb = [0; 3];
-        for (channel, value) in rgb.iter_mut().enumerate() {
-            let source = i32::from(pixel[if channels <= 2 { 0 } else { channel }]);
-            *value = (source * alpha + 255 * (255 - alpha) + 127) / 255;
-            if *value != 0 && *value != 255 {
-                *value = (*value + (BAYER[y % 4][x % 4] * 2 - 15) * 4).clamp(0, 255);
-            }
-        }
-        let color = PALETTE
-            .iter()
-            .min_by_key(|(_, candidate)| {
-                rgb.iter()
-                    .zip(candidate)
-                    .map(|(a, b)| (a - b).pow(2))
-                    .sum::<i32>()
-            })
-            .expect("nonempty palette")
-            .0;
+        let color = pixel_color(pixel, channels, x, y);
         let (native_x, native_y) =
             frame::native_coordinates(orientation, x, y).expect("validated layout coordinates");
         let index = native_y * frame::WIDTH + native_x;
@@ -69,6 +52,29 @@ pub fn row(
     Ok(())
 }
 
-#[cfg(test)]
-#[path = "../tests/unit/conversion.rs"]
-mod tests;
+/// Composite alpha over white, apply ordered dithering, and select a palette code.
+fn pixel_color(pixel: &[u8], channels: usize, x: usize, y: usize) -> u8 {
+    let alpha = if channels == 2 || channels == 4 {
+        i32::from(pixel[channels - 1])
+    } else {
+        255
+    };
+    let mut rgb = [0; 3];
+    for (channel, value) in rgb.iter_mut().enumerate() {
+        let source = i32::from(pixel[if channels <= 2 { 0 } else { channel }]);
+        *value = (source * alpha + 255 * (255 - alpha) + 127) / 255;
+        if *value != 0 && *value != 255 {
+            *value = (*value + (BAYER[y % 4][x % 4] * 2 - 15) * 4).clamp(0, 255);
+        }
+    }
+    PALETTE
+        .iter()
+        .min_by_key(|(_, candidate)| {
+            rgb.iter()
+                .zip(candidate)
+                .map(|(a, b)| (a - b).pow(2))
+                .sum::<i32>()
+        })
+        .expect("nonempty palette")
+        .0
+}

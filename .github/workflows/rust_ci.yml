@@ -66,6 +66,6 @@ jobs:
         with:
           workspaces: firmware
       - name: Run host tests
-        run: cargo +stable test --lib --all-features --target x86_64-unknown-linux-gnu
+        run: cargo +stable test --tests --all-features --target x86_64-unknown-linux-gnu
       - name: Lint host tests
         run: cargo +stable clippy --lib --tests --all-features --target x86_64-unknown-linux-gnu -- -D warnings

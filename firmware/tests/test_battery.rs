@@ -1,4 +1,4 @@
-use super::estimated_percentage;
+use firmware::battery::estimated_percentage;
 
 #[test]
 fn estimates_percentage_from_documented_nimh_pack_range() {

@@ -4,8 +4,10 @@ pub const FRAME_BYTES: usize = WIDTH * HEIGHT / 2;
 pub const SLOT_BYTES: usize = 1024 * 1024;
 pub const STORAGE_BYTES: usize = 2 * SLOT_BYTES;
 pub const PAYLOAD_OFFSET: usize = 4096;
-const HEADER_BYTES: usize = 36;
-const CHUNK_BYTES: usize = 1024;
+/// Size of the serialized frame header.
+pub const HEADER_BYTES: usize = 36;
+/// Size of each frame verification chunk.
+pub const CHUNK_BYTES: usize = 1024;
 const BATTERY_CORNER_MASK: u8 = 0x03;
 const BATTERY_INDICATOR_DISABLED: u8 = 0x80;
 const RESERVED_METADATA_MASK: u8 = 0x7C;
@@ -34,6 +36,7 @@ pub struct Metadata {
 }
 
 impl Default for Metadata {
+    /// Default to native landscape without a battery overlay.
     fn default() -> Self {
         Self {
             orientation: Orientation::Landscape,
@@ -52,6 +55,7 @@ pub struct FrameRecord {
 }
 
 impl FrameRecord {
+    /// Locate the payload inside this record's flash slot.
     pub fn payload_offset(self) -> usize {
         self.slot * SLOT_BYTES + PAYLOAD_OFFSET
     }
@@ -79,8 +83,11 @@ pub struct Scan {
 
 pub trait FrameStorage {
     type Error;
+    /// Read bytes without substituting missing-frame data on storage failure.
     fn read(&mut self, offset: usize, bytes: &mut [u8]) -> Result<(), Self::Error>;
+    /// Erase an inactive slot range before writing its candidate.
     fn erase(&mut self, offset: usize, len: usize) -> Result<(), Self::Error>;
+    /// Write bytes durably enough for immediate verification.
     fn write(&mut self, offset: usize, bytes: &[u8]) -> Result<(), Self::Error>;
 }
 
@@ -92,10 +99,12 @@ pub enum FrameError<E> {
     Verification,
 }
 
+/// Calculate the standard CRC-32 used by headers and packed payloads.
 pub fn crc32(bytes: &[u8]) -> u32 {
     !crc_update(u32::MAX, bytes)
 }
 
+/// Accumulate CRC state across chunks before its final bit inversion.
 fn crc_update(mut crc: u32, bytes: &[u8]) -> u32 {
     for byte in bytes {
         crc ^= u32::from(*byte);
@@ -106,17 +115,20 @@ fn crc_update(mut crc: u32, bytes: &[u8]) -> u32 {
     crc
 }
 
+/// Accept only the six native ED2208 palette codes.
 fn valid_color(color: u8) -> bool {
     matches!(color, 0 | 1 | 2 | 3 | 5 | 6)
 }
 
+/// Validate both packed nibbles of every pixel byte.
 pub fn valid_pixels(bytes: &[u8]) -> bool {
     bytes
         .iter()
         .all(|byte| valid_color(byte >> 4) && valid_color(byte & 15))
 }
 
-fn header(record: FrameRecord) -> [u8; HEADER_BYTES] {
+/// Encode geometry, metadata, checksums, and the final publication tag.
+pub fn header(record: FrameRecord) -> [u8; HEADER_BYTES] {
     let mut bytes = [0; HEADER_BYTES];
     bytes[..4].copy_from_slice(b"HOF1");
     bytes[4] = 1;
@@ -140,7 +152,8 @@ fn header(record: FrameRecord) -> [u8; HEADER_BYTES] {
     bytes
 }
 
-fn parse_header(bytes: &[u8; HEADER_BYTES], slot: usize) -> Option<FrameRecord> {
+/// Reject unsupported or incomplete headers before trusting their payload.
+pub fn parse_header(bytes: &[u8; HEADER_BYTES], slot: usize) -> Option<FrameRecord> {
     if &bytes[..4] != b"HOF1"
         || bytes[4] != 1
         || bytes[6] & RESERVED_METADATA_MASK != 0
@@ -181,6 +194,7 @@ fn parse_header(bytes: &[u8; HEADER_BYTES], slot: usize) -> Option<FrameRecord> 
     })
 }
 
+/// Validate a payload in small chunks, propagating storage errors separately.
 fn validate_payload<S: FrameStorage>(
     storage: &mut S,
     record: FrameRecord,
@@ -205,6 +219,7 @@ fn validate_payload<S: FrameStorage>(
     })
 }
 
+/// Select the newest valid slot; corruption may fall back, storage I/O may not.
 pub fn scan<S: FrameStorage>(storage: &mut S) -> Result<Scan, FrameError<S::Error>> {
     let mut slots = [SlotStatus::Empty; 2];
     let mut current: Option<FrameRecord> = None;
@@ -232,6 +247,7 @@ pub fn scan<S: FrameStorage>(storage: &mut S) -> Result<Scan, FrameError<S::Erro
     Ok(Scan { slots, current })
 }
 
+/// Verify an inactive candidate before publishing its header/tag last.
 pub fn commit<S: FrameStorage>(
     storage: &mut S,
     pixels: &[u8],
@@ -280,6 +296,7 @@ pub fn commit<S: FrameStorage>(
     Ok(record)
 }
 
+/// Read one packed native pixel, rejecting invalid buffers or coordinates.
 pub fn pixel(packed: &[u8], x: usize, y: usize) -> Option<u8> {
     if packed.len() != FRAME_BYTES || x >= WIDTH || y >= HEIGHT {
         return None;
@@ -293,6 +310,7 @@ pub fn pixel(packed: &[u8], x: usize, y: usize) -> Option<u8> {
     })
 }
 
+/// Map layout coordinates to the panel, rotating portrait clockwise.
 pub fn native_coordinates(orientation: Orientation, x: usize, y: usize) -> Option<(usize, usize)> {
     match orientation {
         Orientation::Landscape if x < WIDTH && y < HEIGHT => Some((x, y)),
@@ -302,10 +320,7 @@ pub fn native_coordinates(orientation: Orientation, x: usize, y: usize) -> Optio
     }
 }
 
+/// Generate a white pixel without storing a fallback photo.
 pub fn default_pixel(_x: usize, _y: usize) -> u8 {
     1
 }
-
-#[cfg(test)]
-#[path = "../tests/unit/frame.rs"]
-mod tests;

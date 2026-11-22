@@ -7,8 +7,11 @@ pub const MIN_WAVEFORM_BUSY: Duration = Duration::from_secs(1);
 
 #[derive(Debug, PartialEq)]
 pub enum BusyTimeout {
+    /// BUSY did not assert before the start deadline.
     NeverAsserted,
+    /// BUSY did not complete before the refresh deadline.
     NeverCompleted,
+    /// BUSY returned to idle too quickly to indicate a plausible refresh.
     ImplausiblyShort,
 }
 
@@ -41,7 +44,3 @@ impl RefreshBusy {
         Ok(idle)
     }
 }
-
-#[cfg(test)]
-#[path = "../tests/unit/panel_busy.rs"]
-mod tests;

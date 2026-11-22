@@ -1,4 +1,4 @@
-use super::{FaultSwitch, Gesture, GestureClassifier};
+use firmware::gesture::{FaultSwitch, Gesture, GestureClassifier};
 use std::time::{Duration, Instant};
 
 fn at(wake_at: Instant, millis: u64) -> Instant {
@@ -225,4 +225,24 @@ fn timeout_is_terminal_even_if_further_presses_arrive() {
         classifier.sample(at(wake_at, 3_100), true),
         Some(Gesture::Sleep)
     );
+}
+#[test]
+fn release_gate_rejects_held_and_bouncing_presses_and_rearms_after_release() {
+    use firmware::gesture::ReleaseGate;
+    let start = std::time::Instant::now();
+    let mut gate = ReleaseGate::default();
+    assert!(!gate.sample(start, true));
+    assert!(!gate.sample(start + std::time::Duration::from_secs(4), true));
+    assert!(!gate.sample(start + std::time::Duration::from_secs(5), false));
+    assert!(!gate.sample(start + std::time::Duration::from_millis(5049), true));
+    assert!(!gate.sample(start + std::time::Duration::from_secs(6), false));
+    assert!(!gate.sample(start + std::time::Duration::from_millis(6049), false));
+    assert!(!gate.armed());
+    assert!(!gate.sample(start + std::time::Duration::from_millis(6050), false));
+    assert!(gate.armed());
+    assert!(gate.sample(start + std::time::Duration::from_millis(6051), true));
+    assert!(!gate.sample(start + std::time::Duration::from_secs(7), true));
+    assert!(!gate.sample(start + std::time::Duration::from_secs(8), false));
+    assert!(!gate.sample(start + std::time::Duration::from_millis(8050), false));
+    assert!(gate.sample(start + std::time::Duration::from_millis(8051), true));
 }

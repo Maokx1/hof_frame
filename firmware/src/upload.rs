@@ -17,9 +17,13 @@ const MAX_HEADER_BYTES: usize = 8192;
 
 #[derive(Clone, Copy)]
 pub enum ProgressStage {
+    /// The image upload was received.
     Received,
+    /// The image was decoded and saved.
     Processed,
+    /// The display refresh is starting.
     Displaying,
+    /// The display refresh completed successfully.
     Displayed,
 }
 
@@ -30,11 +34,13 @@ pub enum ProgressEvent<'a> {
     Fatal(&'a str),
 }
 
+/// Start a chunked progress response; HTTP 200 alone does not indicate success.
 pub fn start_progress(stream: &mut impl Write) -> io::Result<()> {
     stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: application/x-hof-progress; charset=utf-8\r\nTransfer-Encoding: chunked\r\nConnection: close\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\n\r\n")?;
     stream.flush()
 }
 
+/// Flush one progress event, terminating the stream for final results.
 pub fn write_progress(stream: &mut impl Write, event: ProgressEvent<'_>) -> io::Result<()> {
     let (line, terminal) = match event {
         ProgressEvent::Stage(stage) => (
@@ -63,10 +69,12 @@ pub fn write_progress(stream: &mut impl Write, event: ProgressEvent<'_>) -> io::
     stream.flush()
 }
 
+/// Remove protocol delimiters from human-readable result text.
 fn progress_message(message: &str) -> String {
     message.replace(['\r', '\n', '\t'], " ")
 }
 
+/// Write a complete bounded response, optionally exposing the retry window.
 pub fn write_response(
     stream: &mut impl Write,
     status: &str,
@@ -82,10 +90,12 @@ pub fn write_response(
     stream.flush()
 }
 
+/// Check the supported printable-ASCII WPA2 password range.
 pub fn valid_wifi_password(password: &str) -> bool {
     (8..=63).contains(&password.len()) && password.bytes().all(|byte| (0x20..=0x7E).contains(&byte))
 }
 
+/// Test absolute and inactivity deadlines using caller-supplied timestamps.
 pub fn receive_timed_out(
     now: std::time::Instant,
     deadline: std::time::Instant,
@@ -105,6 +115,7 @@ pub enum ReceiveError {
 }
 
 impl From<io::Error> for ReceiveError {
+    /// Preserve receive I/O failures separately from destination storage failures.
     fn from(error: io::Error) -> Self {
         Self::Io(error)
     }
@@ -126,6 +137,7 @@ pub enum Request {
     },
 }
 
+/// Read one CRLF line without exceeding the shared framing budget.
 fn line(reader: &mut impl BufRead, remaining: &mut usize) -> Result<String, ReceiveError> {
     let mut bytes = Vec::new();
     loop {
@@ -155,6 +167,7 @@ fn line(reader: &mut impl BufRead, remaining: &mut usize) -> Result<String, Rece
     String::from_utf8(bytes).map_err(|_| ReceiveError::InvalidRequest)
 }
 
+/// Parse a bounded HTTP request before accepting any upload body.
 pub fn request(reader: &mut impl BufRead) -> Result<Request, ReceiveError> {
     let mut remaining = MAX_HEADER_BYTES;
     let first = line(reader, &mut remaining)?;
@@ -162,64 +175,100 @@ pub fn request(reader: &mut impl BufRead) -> Result<Request, ReceiveError> {
     if parts.len() != 3 || parts[2] != "HTTP/1.1" {
         return Err(ReceiveError::InvalidRequest);
     }
-    let mut length = None;
-    let mut chunked = false;
-    let mut content_type = None;
-    let mut expect_continue = false;
+    let headers = read_headers(reader, &mut remaining)?;
+    select_request(parts[0], parts[1], headers)
+}
+
+#[derive(Default)]
+struct Headers {
+    length: Option<usize>,
+    chunked: bool,
+    content_type: Option<String>,
+    expect_continue: bool,
+}
+
+/// Read framing headers and reject duplicates or conflicting body lengths.
+fn read_headers(reader: &mut impl BufRead, remaining: &mut usize) -> Result<Headers, ReceiveError> {
+    let mut headers = Headers::default();
     loop {
-        let header = line(reader, &mut remaining)?;
+        let header = line(reader, remaining)?;
         if header.is_empty() {
             break;
         }
         let (name, value) = header.split_once(':').ok_or(ReceiveError::InvalidRequest)?;
-        let value = value.trim();
+        headers.apply(name, value.trim())?;
+    }
+    if headers.expect_continue || (headers.chunked && headers.length.is_some()) {
+        return Err(ReceiveError::InvalidRequest);
+    }
+    if headers.length.is_some_and(|len| len > MAX_UPLOAD_BYTES) {
+        return Err(ReceiveError::TooLarge);
+    }
+    Ok(headers)
+}
+
+impl Headers {
+    /// Apply a supported header while leaving unrelated headers unchanged.
+    fn apply(&mut self, name: &str, value: &str) -> Result<(), ReceiveError> {
         if name.eq_ignore_ascii_case("content-length") {
-            if length.is_some()
+            if self.length.is_some()
                 || !value.bytes().all(|byte| byte.is_ascii_digit())
                 || value.is_empty()
             {
                 return Err(ReceiveError::InvalidRequest);
             }
-            length = Some(value.parse::<usize>().map_err(|_| ReceiveError::TooLarge)?);
+            self.length = Some(value.parse::<usize>().map_err(|_| ReceiveError::TooLarge)?);
         } else if name.eq_ignore_ascii_case("transfer-encoding") {
-            if chunked || !value.eq_ignore_ascii_case("chunked") {
+            if self.chunked || !value.eq_ignore_ascii_case("chunked") {
                 return Err(ReceiveError::InvalidRequest);
             }
-            chunked = true;
+            self.chunked = true;
         } else if name.eq_ignore_ascii_case("content-type") {
-            if content_type.is_some() {
+            if self.content_type.is_some() {
                 return Err(ReceiveError::InvalidRequest);
             }
-            content_type = Some(value.to_owned());
+            self.content_type = Some(value.to_owned());
         } else if name.eq_ignore_ascii_case("expect") {
-            expect_continue = true;
+            self.expect_continue = true;
         }
+        Ok(())
     }
-    if expect_continue || (chunked && length.is_some()) {
-        return Err(ReceiveError::InvalidRequest);
-    }
-    if length.is_some_and(|len| len > MAX_UPLOAD_BYTES) {
-        return Err(ReceiveError::TooLarge);
-    }
-    if parts[0] == "GET" && !chunked && length.unwrap_or(0) == 0 {
-        return Ok(if parts[1] == "/" {
+}
+
+/// Select a route and validate upload metadata without performing I/O.
+fn select_request(method: &str, target: &str, headers: Headers) -> Result<Request, ReceiveError> {
+    if method == "GET" && !headers.chunked && headers.length.unwrap_or(0) == 0 {
+        return Ok(if target == "/" {
             Request::Page
         } else {
             Request::NotFound
         });
     }
-    if parts[0] != "POST" {
+    if method != "POST" {
         return Err(ReceiveError::InvalidRequest);
     }
-    let (path, query) = parts[1]
-        .split_once('?')
-        .ok_or(ReceiveError::InvalidRequest)?;
+    let (path, query) = target.split_once('?').ok_or(ReceiveError::InvalidRequest)?;
     if path != "/upload" {
         return Err(ReceiveError::InvalidRequest);
     }
-    if !matches!(content_type.as_deref(), Some("image/png" | "image/jpeg")) {
+    if !matches!(
+        headers.content_type.as_deref(),
+        Some("image/png" | "image/jpeg")
+    ) {
         return Err(ReceiveError::UnsupportedImage);
     }
+    Ok(Request::Upload {
+        body: if headers.chunked {
+            BodyLength::Chunked
+        } else {
+            BodyLength::Known(headers.length.ok_or(ReceiveError::InvalidRequest)?)
+        },
+        metadata: parse_metadata(query)?,
+    })
+}
+
+/// Parse the exact supported layout parameters, rejecting duplicates and unknowns.
+fn parse_metadata(query: &str) -> Result<Metadata, ReceiveError> {
     let mut orientation = None;
     let mut corner = None;
     let mut battery_indicator_enabled = None;
@@ -254,20 +303,14 @@ pub fn request(reader: &mut impl BufRead) -> Result<Request, ReceiveError> {
             _ => return Err(ReceiveError::InvalidRequest),
         }
     }
-    Ok(Request::Upload {
-        body: if chunked {
-            BodyLength::Chunked
-        } else {
-            BodyLength::Known(length.ok_or(ReceiveError::InvalidRequest)?)
-        },
-        metadata: Metadata {
-            orientation: orientation.ok_or(ReceiveError::InvalidRequest)?,
-            battery_corner: corner.ok_or(ReceiveError::InvalidRequest)?,
-            battery_indicator_enabled: battery_indicator_enabled.unwrap_or(false),
-        },
+    Ok(Metadata {
+        orientation: orientation.ok_or(ReceiveError::InvalidRequest)?,
+        battery_corner: corner.ok_or(ReceiveError::InvalidRequest)?,
+        battery_indicator_enabled: battery_indicator_enabled.unwrap_or(false),
     })
 }
 
+/// Receive a body into an existing slice without exceeding the upload limit.
 pub fn receive(
     reader: &mut impl BufRead,
     body: BodyLength,
@@ -277,6 +320,7 @@ pub fn receive(
     receive_to(reader, body, &mut io::Cursor::new(destination), capacity)
 }
 
+/// Stream known-length or chunked bytes into bounded destination storage.
 pub fn receive_to(
     reader: &mut impl BufRead,
     body: BodyLength,
@@ -293,40 +337,49 @@ pub fn receive_to(
             copy_body(reader, destination, len, &mut buffer)?;
             Ok(len)
         }
-        BodyLength::Chunked => {
-            let mut total = 0;
-            let mut framing_budget = 128 * 1024;
-            loop {
-                let header = line(reader, &mut framing_budget)?;
-                let size = header
-                    .split(';')
-                    .next()
-                    .ok_or(ReceiveError::InvalidRequest)?;
-                if size.is_empty() || !size.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-                    return Err(ReceiveError::InvalidRequest);
-                }
-                let size = usize::from_str_radix(size, 16).map_err(|_| ReceiveError::TooLarge)?;
-                if size == 0 {
-                    let mut trailers = MAX_HEADER_BYTES;
-                    while !line(reader, &mut trailers)?.is_empty() {}
-                    return Ok(total);
-                }
-                let end = total
-                    .checked_add(size)
-                    .filter(|end| *end <= capacity)
-                    .ok_or(ReceiveError::TooLarge)?;
-                copy_body(reader, destination, size, &mut buffer)?;
-                let mut crlf = [0; 2];
-                reader.read_exact(&mut crlf)?;
-                if crlf != *b"\r\n" {
-                    return Err(ReceiveError::InvalidRequest);
-                }
-                total = end;
-            }
-        }
+        BodyLength::Chunked => receive_chunks(reader, destination, capacity, &mut buffer),
     }
 }
 
+/// Consume bounded chunk framing and trailers while streaming payload bytes.
+fn receive_chunks(
+    reader: &mut impl BufRead,
+    destination: &mut impl Write,
+    capacity: usize,
+    buffer: &mut [u8],
+) -> Result<usize, ReceiveError> {
+    let mut total = 0;
+    let mut framing_budget = 128 * 1024;
+    loop {
+        let header = line(reader, &mut framing_budget)?;
+        let size = header
+            .split(';')
+            .next()
+            .ok_or(ReceiveError::InvalidRequest)?;
+        if size.is_empty() || !size.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+            return Err(ReceiveError::InvalidRequest);
+        }
+        let size = usize::from_str_radix(size, 16).map_err(|_| ReceiveError::TooLarge)?;
+        if size == 0 {
+            let mut trailers = MAX_HEADER_BYTES;
+            while !line(reader, &mut trailers)?.is_empty() {}
+            return Ok(total);
+        }
+        let end = total
+            .checked_add(size)
+            .filter(|end| *end <= capacity)
+            .ok_or(ReceiveError::TooLarge)?;
+        copy_body(reader, destination, size, buffer)?;
+        let mut crlf = [0; 2];
+        reader.read_exact(&mut crlf)?;
+        if crlf != *b"\r\n" {
+            return Err(ReceiveError::InvalidRequest);
+        }
+        total = end;
+    }
+}
+
+/// Copy exactly the requested bytes, distinguishing source and storage failures.
 fn copy_body(
     reader: &mut impl BufRead,
     destination: &mut impl Write,
@@ -344,10 +397,7 @@ fn copy_body(
     Ok(())
 }
 
+/// Recognize supported signatures without claiming the complete image is valid.
 pub fn image_signature(bytes: &[u8]) -> bool {
     bytes.starts_with(b"\x89PNG\r\n\x1a\n") || bytes.starts_with(&[0xFF, 0xD8, 0xFF])
 }
-
-#[cfg(test)]
-#[path = "../tests/unit/upload.rs"]
-mod tests;

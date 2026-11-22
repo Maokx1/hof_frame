@@ -2,6 +2,7 @@ use std::io::{BufRead, Cursor, Seek};
 
 use crate::{conversion, frame};
 
+/// Decode an in-memory PNG using the same bounded row pipeline as flash input.
 pub fn decode(
     encoded: &[u8],
     metadata: frame::Metadata,
@@ -17,6 +18,7 @@ pub fn decode(
     )
 }
 
+/// Decode a static display-sized PNG by rows, invoking caller checkpoints.
 pub fn decode_reader(
     encoded: impl BufRead + Seek,
     encoded_len: usize,
@@ -57,7 +59,3 @@ pub fn decode_reader(
     checkpoint()?;
     Ok(())
 }
-
-#[cfg(test)]
-#[path = "../tests/unit/png_decode.rs"]
-mod tests;

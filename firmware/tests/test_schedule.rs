@@ -1,4 +1,4 @@
-use super::*;
+use firmware::schedule::*;
 
 #[test]
 fn production_intervals_are_twenty_four_hours_and_one_hour() {

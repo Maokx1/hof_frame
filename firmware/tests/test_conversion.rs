@@ -1,4 +1,5 @@
-use super::*;
+use firmware::conversion::*;
+use firmware::frame::{self, Orientation, FRAME_BYTES};
 
 #[test]
 fn spectra6_palette_uses_ed2208_native_codes() {
