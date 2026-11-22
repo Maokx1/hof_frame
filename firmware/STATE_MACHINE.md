@@ -153,7 +153,7 @@ stateDiagram-v2
 | BatteryGuard | button / RTC timer | Safe KEY0 wake for gesture classification, or safe scheduled wake to refresh the saved frame. |
 | ClassifyButton | 3 s hold / 3 presses / other | See [KEY0 gestures](#key0-gestures); `3 presses` is the manual refresh. |
 | LoadFrame | valid / no photo | Persisted frame passes validation, or is missing/corrupt (corruption logged). |
-| DefaultFrame | — | Generated white screen with battery indicator. |
+| DefaultFrame | — | Generated white screen; battery indicator disabled by default. |
 | UploadWindow | received | Complete bounded upload; stream stage events over HTTP while Wi-Fi remains on. |
 | UploadWindow | failed | Idle timeout, deadline, disconnect, or rejected upload. |
 | Decode | valid / failed | Validated candidate, or page error; retry within original window for rejections, stop/latch for memory faults. No fallback refresh. |
@@ -167,7 +167,7 @@ dispatch. On first boot no photo exists, so any refresh shows the
 [default frame](#default-frame). On a cold boot with a valid photo saved (for
 example after a battery swap), refresh the saved photo through the normal
 battery guard and cleanup path; this confirms the frame works and updates the
-battery indicator.
+battery indicator only if enabled in the saved frame metadata.
 
 ### Default frame
 
@@ -175,8 +175,8 @@ When no valid photo is saved (first boot, never uploaded, or the stored frame
 fails validation), refresh with a frame generated in firmware instead of
 skipping the refresh:
 
-- Entire screen white.
-- The [battery indicator](#battery-indicator) in its default position.
+- Entire screen white; the [battery indicator](#battery-indicator) is disabled
+  by default for new frames and appears only when enabled.
 
 The default frame is generated on each use, not stored, so it needs no flash
 space and cannot be corrupted. A corrupt stored frame is logged, and is replaced
@@ -186,8 +186,8 @@ What each refresh shows when a photo may be missing:
 
 | Situation | Screen |
 | --- | --- |
-| First boot, or never uploaded | White default frame + battery box |
-| Stored photo fails validation | White default frame + battery box (corruption logged) |
+| First boot, or never uploaded | White default frame (indicator disabled) |
+| Stored photo fails validation | White default frame (indicator disabled; corruption logged) |
 | Valid photo saved | Saved photo, with battery box if enabled in frame metadata |
 | Upload received, then decode/save fails, valid photo saved | No refresh; panel left unchanged; error on web page |
 | Upload received, then decode/save fails, **no** valid photo saved | No refresh; panel left unchanged; error on web page |
@@ -201,14 +201,15 @@ policy above; it does not claim that the saved image was displayed.
 
 ### Battery indicator
 
-Every refresh, photo or default frame, draws a small rectangle with the
-battery percentage. Draw it at render time over the stored frame; do not bake
-it into the stored photo, so the value is current on each daily refresh.
+When enabled, every refresh, photo or default frame, draws a small rectangle
+with the battery percentage. Draw it at render time over the stored frame; do
+not bake it into the stored photo, so the value is current on each daily refresh.
 
-- Position is chosen on the upload page: top right (default), top left,
+- The indicator is disabled by default for new uploads. Its position selector
+  appears only while it is enabled. Choose top right (default), top left,
   bottom left, or bottom right. Store the choice with the frame metadata so
-  daily, manual, and cold-boot refreshes reuse it. Corners are relative to
-  the chosen display orientation.
+  daily, manual, and cold-boot refreshes reuse it. Corners are relative to the
+  chosen display orientation.
 - The percentage is derived from the calibrated pack voltage. NiMH voltage is
   flat over most of the discharge, so map it with a measured discharge curve
   and treat the value as approximate.
@@ -336,9 +337,9 @@ within the gesture window; `timeout` means the window expired first.
    closes in X seconds."** The countdown reflects the board's remaining idle window,
    not a new five-minute timer started when the page opens. Loading or
    reloading the page does not extend the window.
-5. Choose the layout (landscape or portrait) and battery-indicator corner
-   (top right by default, top left, bottom left, bottom right), select a
-   PNG/JPEG, and upload it. Replace the idle countdown with upload
+5. Choose the layout (landscape or portrait), optionally enable the battery
+   indicator (off by default) and choose its corner, select a PNG/JPEG, and
+   upload it. Replace the idle countdown with upload
    progress/status once the upload starts, because transfer deadlines now
    apply instead.
 6. Immediately after clicking upload, show a four-stage progress bar:

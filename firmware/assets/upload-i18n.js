@@ -22,7 +22,7 @@ const translations = {
   'Wypełnienie zmienia proporcje. Całe zdjęcie zachowuje proporcje i dodaje białe marginesy.': 'Fill stretches the photo. Fit keeps its proportions and adds white borders.',
   'Wypełnij (rozciągnij)': 'Fill (stretch)',
   'Całe zdjęcie (białe marginesy)': 'Fit whole photo (white borders)',
-  'Pokaż wskaźnik baterii na ekranie ramki': 'Show battery indicator on the frame',
+  'Pokaż wskaźnik baterii na ekranie ramki': 'Show battery indicator on the display',
   'Położenie wskaźnika baterii': 'Battery indicator position',
   'Prawy górny róg': 'Top right',
   'Lewy górny róg': 'Top left',

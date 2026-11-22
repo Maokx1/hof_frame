@@ -198,8 +198,9 @@ arms only the RTC timer; a later wake rechecks button release.
    The website estimates battery percentage from the documented D9/GPIO8
    voltage-divider input (`~%`); it shows `?%` if measurement is unavailable.
    The estimate is not calibrated and is not a battery-protection feature.
-3. Select portrait (480 x 800) or landscape (800 x 480), Stretch or Fit,
-   whether to show the frame battery indicator, and its corner. Choose
+3. Select portrait (480 x 800) or landscape (800 x 480), Stretch or Fit, and
+   whether to show the frame battery indicator (off by default). Its corner
+   selector appears only when the indicator is enabled. Choose
    PNG/JPEG up to **7 MB (7,000,000 bytes)**.
 4. The browser normalizes to display-sized PNG, also limited to
    **7 MB (7,000,000 bytes)**.

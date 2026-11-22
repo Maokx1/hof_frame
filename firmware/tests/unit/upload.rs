@@ -302,7 +302,7 @@ fn parses_layout_and_chunked_or_declared_length() {
         };
         assert_eq!(metadata.orientation, Orientation::Landscape);
         assert_eq!(metadata.battery_corner, Corner::BottomLeft);
-        assert!(metadata.battery_indicator_enabled);
+        assert!(!metadata.battery_indicator_enabled);
     }
     assert_eq!(
         request(&mut Cursor::new(b"GET / HTTP/1.1\r\nHost: x\r\n\r\n")).unwrap(),
@@ -320,6 +320,15 @@ fn indicator_setting_can_be_disabled_and_rejects_invalid_values() {
         panic!("upload required")
     };
     assert!(!metadata.battery_indicator_enabled);
+
+    let Request::Upload { metadata, .. } = request(&mut Cursor::new(headers_with_query(
+        "orientation=landscape&corner=bottom-left&indicator=on",
+        "Content-Length: 1\r\n",
+    )))
+    .unwrap() else {
+        panic!("upload required")
+    };
+    assert!(metadata.battery_indicator_enabled);
 
     for query in [
         "orientation=landscape&corner=bottom-left&indicator=maybe",

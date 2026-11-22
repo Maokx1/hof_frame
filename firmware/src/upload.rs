@@ -263,7 +263,7 @@ pub fn request(reader: &mut impl BufRead) -> Result<Request, ReceiveError> {
         metadata: Metadata {
             orientation: orientation.ok_or(ReceiveError::InvalidRequest)?,
             battery_corner: corner.ok_or(ReceiveError::InvalidRequest)?,
-            battery_indicator_enabled: battery_indicator_enabled.unwrap_or(true),
+            battery_indicator_enabled: battery_indicator_enabled.unwrap_or(false),
         },
     })
 }

@@ -1,5 +1,12 @@
 use super::*;
 
+fn enabled_metadata() -> Metadata {
+    Metadata {
+        battery_indicator_enabled: true,
+        ..Metadata::default()
+    }
+}
+
 #[test]
 fn all_corners_follow_layout_rotation_and_exact_margins() {
     for orientation in [Orientation::Portrait, Orientation::Landscape] {
@@ -47,7 +54,7 @@ fn all_corners_follow_layout_rotation_and_exact_margins() {
 
 #[test]
 fn unknown_text_fits_reduced_height_and_all_percentages_fit() {
-    let unknown = StatusOverlay::new(Default::default(), None).unwrap();
+    let unknown = StatusOverlay::new(enabled_metadata(), None).unwrap();
     let mut rendered = std::collections::HashSet::new();
     rendered.insert(unknown.pixels.clone());
     let text_rows: Vec<_> = (BORDER..BOX_HEIGHT - BORDER)
@@ -60,7 +67,7 @@ fn unknown_text_fits_reduced_height_and_all_percentages_fit() {
         TEXT_HEIGHT
     );
     for value in 0..=100 {
-        let overlay = StatusOverlay::new(Default::default(), Some(value)).unwrap();
+        let overlay = StatusOverlay::new(enabled_metadata(), Some(value)).unwrap();
         assert!(overlay
             .pixels
             .iter()
@@ -70,9 +77,17 @@ fn unknown_text_fits_reduced_height_and_all_percentages_fit() {
             "duplicate label for {value}%"
         );
     }
-    assert!(StatusOverlay::new(Default::default(), Some(101)).is_err());
+    assert!(StatusOverlay::new(enabled_metadata(), Some(101)).is_err());
     assert_eq!(unknown.pixel(frame::WIDTH, 0), None);
     assert_eq!(unknown.pixel(0, frame::HEIGHT), None);
+}
+
+#[test]
+fn default_metadata_disables_battery_indicator() {
+    assert!(!Metadata::default().battery_indicator_enabled);
+    let overlay = StatusOverlay::new(Metadata::default(), None).unwrap();
+
+    assert!(overlay.pixels.is_empty());
 }
 
 #[test]
@@ -97,7 +112,7 @@ fn indicator_size_is_scaled_for_the_7_3_inch_panel() {
 #[test]
 fn overlay_never_modifies_saved_payload() {
     let photo = vec![0x66; frame::FRAME_BYTES];
-    let overlay = StatusOverlay::new(Default::default(), None).unwrap();
+    let overlay = StatusOverlay::new(enabled_metadata(), None).unwrap();
     let corner = frame::WIDTH - MARGIN - BOX_WIDTH;
     assert_eq!(overlay.pixel(corner, MARGIN).unwrap_or(6), BLACK);
     assert_eq!(overlay.pixel(0, 0).unwrap_or(6), 6);
@@ -107,7 +122,7 @@ fn overlay_never_modifies_saved_payload() {
 #[test]
 fn full_battery_precedes_unknown_and_full_percentage() {
     for percentage in [None, Some(100)] {
-        let overlay = StatusOverlay::new(Default::default(), percentage).unwrap();
+        let overlay = StatusOverlay::new(enabled_metadata(), percentage).unwrap();
         let y = (BOX_HEIGHT - ICON_HEIGHT) / 2;
         let left = (BORDER..BOX_WIDTH - BORDER)
             .find(|x| overlay.pixels[y * BOX_WIDTH + x] == BLACK)

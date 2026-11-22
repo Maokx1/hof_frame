@@ -255,8 +255,8 @@ Required behavior:
 3. Start a five-minute idle timer when the access point comes up, then shorten it after measuring real transfers.
 4. Apply transfer deadlines to an accepted upload; retain the original idle/global deadline for any retries without extending it.
 5. Receive and validate a complete image. Keep Wi-Fi active through decode, verified save, display refresh, and safety cleanup. Stream real stages to a four-part web progress bar (Send image, Process image, Update display, Complete); only the terminal success event confirms completion, not the initial HTTP status. Wait six seconds after success before shutting down the AP.
-6. Decode, stretch to the orientation chosen on the upload page (landscape 800×480 or portrait 480×800), apply the required Spectra 6 color conversion and dithering, and persist a display-ready frame with its orientation, battery-indicator corner, and enabled state. Render only a complete, decodable, integrity-checked image. Every refresh overlays the optional 68×28 battery-percentage box in the chosen corner (top right by default). On a cold boot with a valid photo saved, refresh it.
-7. On an RTC wake, refresh the persisted frame with Wi-Fi disabled, then return to deep sleep. If no valid photo is saved (first boot, never uploaded, or corrupt), refresh a generated default frame instead: white screen with a small battery-percentage rectangle.
+6. Decode, stretch to the orientation chosen on the upload page (landscape 800×480 or portrait 480×800), apply the required Spectra 6 color conversion and dithering, and persist a display-ready frame with its orientation, battery-indicator corner, and enabled state. Render only a complete, decodable, integrity-checked image. When enabled (off by default for new frames), every refresh overlays the optional 68×28 battery-percentage box in the chosen corner (top right by default). On a cold boot with a valid photo saved, refresh it.
+7. On an RTC wake, refresh the persisted frame with Wi-Fi disabled, then return to deep sleep. If no valid photo is saved (first boot, never uploaded, or corrupt), refresh a generated default frame instead: a white screen, with the battery indicator disabled by default.
 8. On a button wake, three KEY0/GPIO2 presses within 3 s from wake (counting the waking press) trigger a manual refresh: the same battery-guarded, Wi-Fi-off path as the RTC refresh. It does not clear the low-battery latch. At most one manual refresh per hour; a triple press within the hour is ignored. See [button gestures](../firmware/STATE_MACHINE.md#key0-gestures).
 9. Below the measured low-battery threshold, or while the low-battery latch is set, do not start Wi-Fi or a display refresh; the converter's built-in cutoff disables its output. When the latch first sets, show a "Replace batteries" screen once, only if the voltage still has margin for that refresh.
 10. Transfer/decode rejection leaves the persisted frame and display unchanged and permits retry within the original bounded window. Save/display/safety faults report failure on the web page where possible, then stop and latch without automatic retry. Retain any valid committed photo; never trigger an extra fallback refresh or persistent error mark.
@@ -292,7 +292,8 @@ Required behavior:
 - Decode only after the complete upload has been received and validated.
 - Reject images whose decoded width, height, pixel count, or working-memory requirement exceeds configured decoder limits, regardless of encoded size. This prevents decompression bombs and oversized malformed images from exhausting RAM.
 - The page lets the person choose landscape or portrait layout, Stretch/Fit,
-  whether to show the battery indicator, and its corner, then the board maps
+  whether to show the battery indicator (off by default), and its corner when
+  enabled, then the board maps
   pixels to the display's Spectra 6 palette with mandatory dithering.
 - The battery box measures 68 x 28 pixels for the 7.3-inch panel, with up to
   14-pixel-high smooth text, a white background and black border, and a 9-pixel
@@ -344,7 +345,7 @@ Wi-Fi throughput through the ESP32-S3 access point is roughly 0.5–2 MB/s;
 absolute deadline with maximum-size transfers on the board. For comparison,
 BLE would be roughly 10–80 kB/s (about a minute to several minutes).
 
-Decided: SSID `HOF-Frame` with a build-time WPA2 password kept out of git; transfer-inactivity timeout and absolute transfer deadline both 2 minutes initially (easy-to-change constants); no upload checksum. If the battery reading fails, the battery box shows `?` and the frame carries on, relying on the converter's hardware cutoff.
+Decided: SSID `HOF-Frame` with a build-time WPA2 password kept out of git; transfer-inactivity timeout and absolute transfer deadline both 2 minutes initially (easy-to-change constants); no upload checksum. The battery indicator is disabled by default, and its corner selector appears only when enabled. If the battery reading fails while enabled, the battery box shows `?` and the frame carries on, relying on the converter's hardware cutoff.
 
 ## Firmware milestones
 

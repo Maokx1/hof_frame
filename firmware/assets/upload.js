@@ -1,4 +1,12 @@
 const status = document.getElementById('status'), form = document.getElementById('form');
+const batteryIndicatorControl = document.getElementById('battery-indicator');
+const batteryCornerField = document.getElementById('battery-corner-field');
+function syncBatteryCornerVisibility() {
+  batteryCornerField.hidden = !batteryIndicatorControl.checked;
+}
+batteryIndicatorControl.addEventListener('change', syncBatteryCornerVisibility);
+syncBatteryCornerVisibility();
+
 document.getElementById('file').addEventListener('change', event => {
   bindText(document.getElementById('filename'), event.target.files[0]?.name || t('Nie wybrano pliku'));
 });

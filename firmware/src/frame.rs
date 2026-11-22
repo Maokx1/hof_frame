@@ -38,7 +38,7 @@ impl Default for Metadata {
         Self {
             orientation: Orientation::Landscape,
             battery_corner: Corner::TopRight,
-            battery_indicator_enabled: true,
+            battery_indicator_enabled: false,
         }
     }
 }
