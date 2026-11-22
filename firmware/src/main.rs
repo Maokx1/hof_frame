@@ -123,7 +123,6 @@ fn refresh_panel_with(
     safety: &mut SafetyGuard<safety_nvs::NvsSafetyStore>,
     color_at: impl Fn(usize, usize) -> u8,
 ) -> Result<DisplayOutcome, EspError> {
-    set_work_phase(safety, WorkPhase::Display)?;
     log::info!("creating panel interface; panel load switch will turn on");
     let epd = match epd::Epd::new() {
         Ok(epd) => epd,
@@ -135,20 +134,24 @@ fn refresh_panel_with(
         }
     };
     log::info!("panel interface ready");
-    let refresh = (|| {
-        log::info!("sending panel initialization sequence");
-        epd.init()?;
-        log::info!("panel initialization complete");
+    // Drop the pixel source, which may own a flash mapping, before NVS cleanup writes.
+    let refresh = {
+        let epd = &epd;
+        (move || {
+            log::info!("sending panel initialization sequence");
+            epd.init()?;
+            log::info!("panel initialization complete");
 
-        log::info!("streaming image pixels");
-        let start = Instant::now();
-        epd.show(color_at)?;
-        log::info!(
-            "panel show sequence completed in {:.1} s",
-            start.elapsed().as_secs_f32()
-        );
-        Ok(())
-    })();
+            log::info!("streaming image pixels");
+            let start = Instant::now();
+            epd.show(color_at)?;
+            log::info!(
+                "panel show sequence completed in {:.1} s",
+                start.elapsed().as_secs_f32()
+            );
+            Ok(())
+        })()
+    };
 
     if let Err(error) = refresh {
         log::error!("panel display operation failed: {error:?}");
@@ -218,10 +221,12 @@ fn refresh_saved_frame(
         log::error!("battery overlay rendering failed: {error}; panel remains OFF");
         EspError::from(esp_idf_svc::sys::ESP_ERR_INVALID_STATE).unwrap()
     })?;
+    // Keep NVS phase writes outside the mapped-frame lifetime.
+    set_work_phase(safety, WorkPhase::Display)?;
     if let Some(record) = scan.current {
         let mapped = storage.map(record)?;
         log::info!("rendering validated native-order frame: {record:?}; live status overlay");
-        refresh_panel_with(safety, |x, y| {
+        refresh_panel_with(safety, move |x, y| {
             if let Some(pixel) = overlay.pixel(x, y) {
                 return pixel;
             }
@@ -234,7 +239,7 @@ fn refresh_saved_frame(
             }
         })
     } else {
-        refresh_panel_with(safety, |x, y| {
+        refresh_panel_with(safety, move |x, y| {
             overlay
                 .pixel(x, y)
                 .unwrap_or_else(|| firmware::frame::default_pixel(x, y))
