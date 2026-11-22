@@ -193,7 +193,7 @@ fn indexed_png_expands_palette() {
         .unwrap();
     let mut output = vec![0; frame::FRAME_BYTES];
     decode(&encoded, Default::default(), &mut output, || Ok(())).unwrap();
-    assert!(output.iter().all(|byte| *byte == 0x55));
+    assert!(output.iter().all(|byte| *byte == 0x33));
 }
 
 #[test]

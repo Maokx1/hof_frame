@@ -60,7 +60,7 @@ pub fn row(
             frame::native_coordinates(orientation, x, y).expect("validated layout coordinates");
         let index = native_y * frame::WIDTH + native_x;
         let byte = &mut output[index / 2];
-        if index % 2 == 0 {
+        if index.is_multiple_of(2) {
             *byte = (*byte & 15) | color << 4;
         } else {
             *byte = (*byte & 240) | color;

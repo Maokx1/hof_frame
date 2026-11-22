@@ -232,7 +232,7 @@ fn refresh_saved_frame(
             }
             let index = y * firmware::frame::WIDTH + x;
             let byte = mapped.bytes()[index / 2];
-            if index % 2 == 0 {
+            if index.is_multiple_of(2) {
                 byte >> 4
             } else {
                 byte & 15

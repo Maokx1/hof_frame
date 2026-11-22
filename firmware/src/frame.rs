@@ -286,7 +286,11 @@ pub fn pixel(packed: &[u8], x: usize, y: usize) -> Option<u8> {
     }
     let index = y * WIDTH + x;
     let byte = packed[index / 2];
-    Some(if index % 2 == 0 { byte >> 4 } else { byte & 15 })
+    Some(if index.is_multiple_of(2) {
+        byte >> 4
+    } else {
+        byte & 15
+    })
 }
 
 pub fn native_coordinates(orientation: Orientation, x: usize, y: usize) -> Option<(usize, usize)> {

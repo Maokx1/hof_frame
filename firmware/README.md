@@ -369,6 +369,14 @@ Simply unsetting `VIRTUAL_ENV` is insufficient: `python3` must resolve to a base
 interpreter. The check below reports this before starting the embedded builds.
 Host Rust tests do not require leaving the Python virtual environment.
 
+Do not use plain `cargo test`: the default target is the ESP32-S3, and its
+runner flashes the unit-test executable onto the board and starts the serial
+monitor. These tests are intended to run on the host, not under the board's
+watchdog and thread constraints. Always specify the host target as below.
+If you have flashed the test executable, stop the monitor with Ctrl+C and
+restore the application with `cargo run --release` (add `--features usb` for
+USB testing), using your normal ESP-IDF environment and build-time password.
+
 ```sh
 cd firmware
 cargo +stable test --lib --target x86_64-unknown-linux-gnu
