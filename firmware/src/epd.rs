@@ -39,25 +39,46 @@ const CMD_POWER_ON: u8 = 0x04;
 const CMD_POWER_OFF: u8 = 0x02;
 const BUSY_TIMEOUT: Duration = Duration::from_secs(20);
 
+// Command names follow the ED2208-GCA reference driver:
+// https://github.com/zephyrproject-rtos/zephyr/blob/main/drivers/display/display_ed2208_gca.c
 const INIT_SEQUENCE: &[(u8, &[u8])] = &[
+    // Send the command header (CMDH).
     (0xAA, &[0x49, 0x55, 0x20, 0x08, 0x09, 0x18]),
+    // Configure power settings (PWRR).
     (0x01, &[0x3F, 0x00, 0x32, 0x2A, 0x0E, 0x2A]),
+    // Configure panel settings (PSR).
     (0x00, &[0x5F, 0x69]),
+    // Configure the power-off sequence (POFS).
     (0x03, &[0x00, 0x54, 0x00, 0x44]),
+    // Configure the first booster stage (BTST1).
     (0x05, &[0x40, 0x1F, 0x1F, 0x2C]),
+    // Configure the second booster stage (BTST2).
     (0x06, &[0x6F, 0x1F, 0x16, 0x25]),
+    // Configure the third booster stage (BTST3).
     (0x08, &[0x6F, 0x1F, 0x1F, 0x22]),
+    // Set the IPC register.
     (0x13, &[0x00, 0x04]),
+    // Configure the controller clock (PLL).
     (0x30, &[0x02]),
+    // Set the TSE register.
     (0x41, &[0x00]),
+    // Set the CDI register.
     (0x50, &[0x3F]),
+    // Configure the timing controller (TCON).
     (0x60, &[0x02, 0x00]),
+    // Set the resolution to 800 by 480 pixels (TRES).
     (0x61, &[0x03, 0x20, 0x01, 0xE0]),
+    // Set the VDCS register.
     (0x82, &[0x1E]),
+    // Set the T_VDCS register.
     (0x84, &[0x01]),
+    // Set the AGID register.
     (0x86, &[0x00]),
+    // Set the PWS register.
     (0xE3, &[0x2F]),
+    // Set the CCSET register.
     (0xE0, &[0x00]),
+    // Set the TSSET register.
     (0xE6, &[0x00]),
 ];
 
