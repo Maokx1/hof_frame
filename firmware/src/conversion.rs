@@ -1,6 +1,6 @@
 //! Image conversion utilities to match display panel requirements.
 
-use crate::frame::{self, Orientation, FRAME_BYTES};
+use crate::frame::{self, FRAME_BYTES, Orientation};
 
 /// Native panel codes and their RGB colors.
 pub const PALETTE: [(u8, [i32; 3]); 6] = [

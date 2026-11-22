@@ -442,13 +442,13 @@ impl<'a> ProgressConnection<'a> {
 
     /// Log a lost connection once; transport failure does not cancel image work.
     fn send(&mut self, event: ProgressEvent<'_>) {
-        if self.connected {
-            if let Err(error) = upload::write_progress(self.stream, event) {
-                log::warn!(
-                    "UploadWindow: progress/result connection lost: {error}; continuing image work"
-                );
-                self.connected = false;
-            }
+        if self.connected
+            && let Err(error) = upload::write_progress(self.stream, event)
+        {
+            log::warn!(
+                "UploadWindow: progress/result connection lost: {error}; continuing image work"
+            );
+            self.connected = false;
         }
     }
 }

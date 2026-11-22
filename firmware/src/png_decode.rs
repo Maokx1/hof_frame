@@ -15,7 +15,9 @@ pub enum DecodeError {
     #[error("{0}")]
     Png(#[from] png::DecodingError),
     /// The PNG is interlaced, animated, or not at the selected display resolution.
-    #[error("requires a non-interlaced, static PNG at the selected display resolution; use the upload page to resize PNG/JPEG")]
+    #[error(
+        "requires a non-interlaced, static PNG at the selected display resolution; use the upload page to resize PNG/JPEG"
+    )]
     UnsupportedLayout,
     /// The PNG decodes to a bit depth other than eight.
     #[error("unsupported PNG output bit depth")]

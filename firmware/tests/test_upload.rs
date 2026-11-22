@@ -558,11 +558,13 @@ fn indicator_setting_can_be_disabled_and_rejects_invalid_values() {
         "orientation=landscape&corner=bottom-left&indicator=maybe",
         "orientation=landscape&corner=bottom-left&indicator=off&indicator=on",
     ] {
-        assert!(request(&mut Cursor::new(headers_with_query(
-            query,
-            "Content-Length: 1\r\n",
-        )))
-        .is_err());
+        assert!(
+            request(&mut Cursor::new(headers_with_query(
+                query,
+                "Content-Length: 1\r\n",
+            )))
+            .is_err()
+        );
     }
 }
 
@@ -595,11 +597,13 @@ fn rejects_oversize_duplicate_and_ambiguous_framing() {
         request(&mut Cursor::new(headers(&overflow))),
         Err(ReceiveError::TooLarge)
     ));
-    assert!(request(&mut Cursor::new(format!(
-        "GET / HTTP/1.1\r\nX: {}\r\n\r\n",
-        "a".repeat(9000)
-    )))
-    .is_err());
+    assert!(
+        request(&mut Cursor::new(format!(
+            "GET / HTTP/1.1\r\nX: {}\r\n\r\n",
+            "a".repeat(9000)
+        )))
+        .is_err()
+    );
 }
 
 #[test]

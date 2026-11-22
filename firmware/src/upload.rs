@@ -82,7 +82,11 @@ pub fn write_response(
     body: &str,
     remaining: Option<u64>,
 ) -> io::Result<()> {
-    write!(stream, "HTTP/1.1 {status}\r\nContent-Type: {kind}\r\nContent-Length: {}\r\nConnection: close\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\n", body.len())?;
+    write!(
+        stream,
+        "HTTP/1.1 {status}\r\nContent-Type: {kind}\r\nContent-Length: {}\r\nConnection: close\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\n",
+        body.len()
+    )?;
     if let Some(seconds) = remaining {
         write!(stream, "X-Window-Seconds: {seconds}\r\n")?;
     }

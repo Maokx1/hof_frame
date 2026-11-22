@@ -1,5 +1,5 @@
 use firmware::conversion::*;
-use firmware::frame::{self, Orientation, FRAME_BYTES};
+use firmware::frame::{self, FRAME_BYTES, Orientation};
 
 #[test]
 fn converts_known_colors_to_packed_pixels_in_both_orientations() {
@@ -66,9 +66,11 @@ fn transparent_pixels_become_white_and_opaque_pixels_keep_their_color() {
             transparent.len(),
         )
         .unwrap();
-        assert!(output[..frame::WIDTH / 2]
-            .iter()
-            .all(|byte| *byte == expected));
+        assert!(
+            output[..frame::WIDTH / 2]
+                .iter()
+                .all(|byte| *byte == expected)
+        );
         assert!(output[frame::WIDTH / 2..].iter().all(|byte| *byte == 0x66));
     }
 }

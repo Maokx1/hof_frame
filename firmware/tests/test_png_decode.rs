@@ -198,13 +198,15 @@ fn malformed_wrong_dimensions_and_deadline_are_rejected() {
         )),
         Err(DecodeError::DeadlineExceeded)
     ));
-    assert!(decode(
-        &encoded[..encoded.len() / 2],
-        Default::default(),
-        &mut output,
-        || Ok(())
-    )
-    .is_err());
+    assert!(
+        decode(
+            &encoded[..encoded.len() / 2],
+            Default::default(),
+            &mut output,
+            || Ok(())
+        )
+        .is_err()
+    );
     assert!(matches!(
         decode(b"\xff\xd8\xff", Default::default(), &mut output, || Ok(())),
         Err(DecodeError::Png(_))

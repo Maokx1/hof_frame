@@ -83,10 +83,12 @@ fn unknown_text_fits_reduced_height_and_all_percentages_fit() {
     );
     for value in 0..=100 {
         let overlay = StatusOverlay::new(enabled_metadata(), Some(value)).unwrap();
-        assert!(overlay
-            .pixels
-            .iter()
-            .all(|pixel| matches!(pixel, &BLACK | &WHITE)));
+        assert!(
+            overlay
+                .pixels
+                .iter()
+                .all(|pixel| matches!(pixel, &BLACK | &WHITE))
+        );
         assert!(
             rendered.insert(overlay.pixels),
             "duplicate label for {value}%"
@@ -137,11 +139,11 @@ fn full_battery_precedes_unknown_and_full_percentage() {
             overlay.pixels[(y + ICON_HEIGHT / 2) * BOX_WIDTH + left + ICON_WIDTH - 1],
             BLACK
         );
-        assert!((left + ICON_WIDTH..left + ICON_WIDTH + 2)
-            .all(|x| (BORDER..BOX_HEIGHT - BORDER)
-                .all(|y| overlay.pixels[y * BOX_WIDTH + x] == WHITE)));
-        assert!((left + ICON_WIDTH + 2..BOX_WIDTH - BORDER)
-            .any(|x| (BORDER..BOX_HEIGHT - BORDER)
-                .any(|y| overlay.pixels[y * BOX_WIDTH + x] == BLACK)));
+        assert!((left + ICON_WIDTH..left + ICON_WIDTH + 2).all(|x| {
+            (BORDER..BOX_HEIGHT - BORDER).all(|y| overlay.pixels[y * BOX_WIDTH + x] == WHITE)
+        }));
+        assert!((left + ICON_WIDTH + 2..BOX_WIDTH - BORDER).any(|x| {
+            (BORDER..BOX_HEIGHT - BORDER).any(|y| overlay.pixels[y * BOX_WIDTH + x] == BLACK)
+        }));
     }
 }

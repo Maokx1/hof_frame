@@ -1,6 +1,6 @@
 //! RTC clock and production scheduling retained across deep sleep.
 
-use crate::schedule::{RefreshSchedule, DAILY_INTERVAL_US};
+use crate::schedule::{DAILY_INTERVAL_US, RefreshSchedule};
 use esp_idf_svc::hal::reset::ResetReason;
 
 const RETAINED_MAGIC: u32 = 0x484F_4632;
@@ -13,14 +13,14 @@ pub struct RetainedState {
     pub refresh_in_progress: u32,
 }
 
-#[link_section = ".rtc.data"]
+#[unsafe(link_section = ".rtc.data")]
 static mut RETAINED_STATE: RetainedState = RetainedState {
     magic: 0,
     schedule: RefreshSchedule::new(0),
     refresh_in_progress: 0,
 };
 
-extern "C" {
+unsafe extern "C" {
     /// ESP-IDF's microsecond RTC clock, retained through deep sleep.
     fn esp_rtc_get_time_us() -> i64;
 }

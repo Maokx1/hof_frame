@@ -3,7 +3,7 @@
 use crate::{
     gesture::Gesture,
     safety::SafetyState,
-    schedule::{RefreshSchedule, MANUAL_LIMIT_US},
+    schedule::{MANUAL_LIMIT_US, RefreshSchedule},
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

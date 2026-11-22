@@ -2,8 +2,8 @@
 
 use crate::frame::{self, Corner, Metadata, Orientation};
 use swash::{
-    scale::{image::Image, Render, ScaleContext, Source},
     FontRef,
+    scale::{Render, ScaleContext, Source, image::Image},
 };
 
 pub const BOX_WIDTH: usize = 68;

@@ -423,8 +423,11 @@ pyftsubset /usr/share/fonts/truetype/dejavu/DejaVuSans.ttf \
 ## Developer workflow
 
 Run the commands below from the `firmware` directory. Embedded builds require
-the `esp` Rust toolchain installed with `espup`, `~/export-esp.sh` sourced, and
-`ldproxy`, `espflash`, CMake, Ninja, Git, and Python 3 available. Configure the
+the Espressif Rust 1.100.0.0 `esp` toolchain installed with
+`espup install --toolchain-version 1.100.0.0` (or
+`espup update --toolchain-version 1.100.0.0` for an existing installation),
+`~/export-esp.sh` sourced, and `ldproxy`, `espflash`, CMake, Ninja, Git, and
+Python 3 available. CI uses the same toolchain version. Configure the
 [hotspot password](#set-the-hotspot-password-once) before running the firmware.
 
 Before embedded builds, leave any active Python virtual environment (for

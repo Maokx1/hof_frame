@@ -95,11 +95,7 @@ impl FrameStorage for Flash {
         self.mutations += 1;
         let failed = self.fail_at == Some(self.mutations);
         let len = if failed {
-            if self.torn {
-                bytes.len() / 2
-            } else {
-                0
-            }
+            if self.torn { bytes.len() / 2 } else { 0 }
         } else {
             bytes.len()
         };
