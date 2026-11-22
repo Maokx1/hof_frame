@@ -191,8 +191,10 @@ arms only the RTC timer; a later wake rechecks button release.
 
 1. Hold KEY0, join WPA2 **HOF-Frame**, and stay connected despite the "no internet"
    warning. One client at a time.
-2. Open **[http://192.168.4.1](http://192.168.4.1)**. DHCP uses the explicitly configured
-   `192.168.4.1/24` subnet; the ready log checks the actual interface address.
+2. Open **[http://bursztynki.local](http://bursztynki.local)**. The board
+   advertises this `.local` hostname over mDNS while the hotspot is active.
+   DHCP uses the explicitly configured `192.168.4.1/24` subnet; the firmware
+   checks the actual interface address.
    The website estimates battery percentage from the documented D9/GPIO8
    voltage-divider input (`~%`); it shows `?%` if measurement is unavailable.
    The estimate is not calibrated and is not a battery-protection feature.

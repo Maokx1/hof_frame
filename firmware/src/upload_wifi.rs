@@ -3,6 +3,7 @@ use std::net::{TcpListener, TcpStream};
 use std::time::{Duration, Instant};
 
 use esp_idf_svc::hal::delay::FreeRtos;
+use esp_idf_svc::mdns::EspMdns;
 use esp_idf_svc::wifi::{
     AccessPointConfiguration, AuthMethod, BlockingWifi, Configuration, EspWifi,
 };
@@ -13,6 +14,7 @@ use crate::upload_flash::FlashUpload;
 const PASSWORD: Option<&str> = option_env!("HOF_WIFI_PASSWORD");
 const PAGE: &str = include_str!("../assets/upload.html");
 pub const AP_ADDRESS: std::net::Ipv4Addr = std::net::Ipv4Addr::new(192, 168, 4, 1);
+pub const AP_HOSTNAME: &str = "bursztynki";
 
 pub struct Received {
     pub buffer: FlashUpload,
@@ -172,6 +174,8 @@ pub fn run(
             )
             .into());
         }
+        let mut mdns = EspMdns::take()?;
+        mdns.set_hostname(AP_HOSTNAME)?;
         wifi.start()?;
         wifi.wait_netif_up()?;
         let address = wifi.wifi().ap_netif().get_ip_info()?.ip;
@@ -183,7 +187,7 @@ pub fn run(
         }
         let listener = TcpListener::bind(("0.0.0.0", 80))?;
         listener.set_nonblocking(true)?;
-        log::info!("UploadWindow: AP HOF-Frame ready; open http://{address}; WPA2; one client only; idle=300 s; panel OFF");
+        log::info!("UploadWindow: AP HOF-Frame ready; open http://{AP_HOSTNAME}.local; WPA2; one client only; idle=300 s; panel OFF");
         let idle_deadline = (Instant::now() + upload::IDLE_TIMEOUT).min(awake_deadline);
         loop {
             if Instant::now() >= idle_deadline || Instant::now() >= awake_deadline {

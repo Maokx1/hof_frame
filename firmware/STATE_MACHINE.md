@@ -57,8 +57,9 @@ implemented behavior and build instructions.
 - KEY0/GPIO2 is active-low with pull-up: hold three seconds for upload, triple
   press within three seconds for manual refresh. Debounce is 50 ms. Production
   handles a stuck switch with a 60-second release timeout and timer-only sleep.
-- AP is one-client WPA2 HOF-Frame at checked `192.168.4.1/24`, with local
-  build-time credentials and no default. Browser Stretch/Fit normalizes
+- AP is one-client WPA2 HOF-Frame at checked `192.168.4.1/24`, advertising
+  `bursztynki.local` over mDNS, with local build-time credentials and no
+  default. Browser Stretch/Fit normalizes
   PNG/JPEG to a display-sized PNG. Device PNG decoding is static/non-interlaced,
   row-based, bounded, alpha-over-white, with ordered six-color dithering.
   Raw JPEG is not device-decoded. Input is capped at 7 MB (7,000,000 bytes)
@@ -328,8 +329,9 @@ within the gesture window; `timeout` means the window expired first.
 1. Hold KEY0 for three seconds. The board creates its own Wi-Fi hotspot.
 2. Join that network from a phone or computer using the printed password.
    Stay connected even if the device warns that the network has no internet.
-3. Open `http://192.168.4.1` in a browser. The board serves the upload page;
-   no external website or internet connection is needed.
+3. Open `http://bursztynki.local` in a browser. The board advertises this name
+   over mDNS and serves the upload page; no external website or internet
+   connection is needed.
 4. While waiting for a photo, the page shows **"No upload started. Hotspot
    closes in X seconds."** The countdown reflects the board's remaining idle window,
    not a new five-minute timer started when the page opens. Loading or
@@ -403,8 +405,8 @@ sequenceDiagram
 - Network name (SSID) **`HOF-Frame`**, WPA2. The password is fixed at build
   time (for example from an environment variable or an ignored local config
   file), never committed to git, and printed on the frame. Serve the page at
-  `http://192.168.4.1`. One client and one successful upload per wake, without an
-  app-level login.
+  `http://bursztynki.local` using mDNS. One client and one successful upload
+  per wake, without an app-level login.
 - Allow PNG/JPEG only, with a maximum encoded body of **7 MB (7,000,000 bytes)**.
   Check declared size before flash writes and cumulative size while streaming,
   including chunked or unknown-length bodies.

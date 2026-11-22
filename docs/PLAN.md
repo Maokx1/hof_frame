@@ -251,7 +251,7 @@ flowchart TD
 Required behavior:
 
 1. Wake from deep sleep using KEY0/GPIO2 or the 24-hour RTC timer and identify the wake cause.
-2. On a button wake, qualify a three-second KEY0/GPIO2 hold before starting a Wi-Fi access point (SSID `HOF-Frame`, WPA2, password fixed at build time, kept out of git, and printed on the frame) and an HTTP server that serves a single upload page at `http://192.168.4.1`. Shorter presses return to sleep without starting Wi-Fi.
+2. On a button wake, qualify a three-second KEY0/GPIO2 hold before starting a Wi-Fi access point (SSID `HOF-Frame`, WPA2, password fixed at build time, kept out of git, and printed on the frame) and an HTTP server that serves a single upload page at `http://bursztynki.local` over mDNS. Shorter presses return to sleep without starting Wi-Fi.
 3. Start a five-minute idle timer when the access point comes up, then shorten it after measuring real transfers.
 4. Apply transfer deadlines to an accepted upload; retain the original idle/global deadline for any retries without extending it.
 5. Receive and validate a complete image. Keep Wi-Fi active through decode, verified save, display refresh, and safety cleanup. Stream real stages to a four-part web progress bar (Send image, Process image, Update display, Complete); only the terminal success event confirms completion, not the initial HTTP status. Wait six seconds after success before shutting down the AP.

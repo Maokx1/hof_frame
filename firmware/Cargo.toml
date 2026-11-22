@@ -5,6 +5,9 @@ edition = "2021"
 default-run = "firmware"
 resolver = "3"
 
+[[package.metadata.esp-idf-sys.extra_components]]
+remote_component = { name = "espressif/mdns", version = "1.*" }
+
 [features]
 usb = []
 
