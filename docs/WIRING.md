@@ -155,6 +155,26 @@ schedule; do not leave it running unattended. Disconnect power when finished.
 
 ## KiCad wiring model
 
+The connection model in [`wiring_model/`](wiring_model) uses
+[circuit-synth](https://www.circuit-synth.com/) and
+[uv](https://docs.astral.sh/uv/). From the repository root, download KiCad's
+`Connector_Generic` and `power` symbol libraries into the git-ignored
+`.kicad/symbols` directory:
+
+```sh
+mkdir -p .kicad/symbols
+for lib in Connector_Generic power; do
+  curl -fsSL "https://gitlab.com/kicad/libraries/kicad-symbols/-/raw/9.0.0/$lib.kicad_sym" \
+    -o ".kicad/symbols/$lib.kicad_sym"
+done
+```
+
+Print the model's net list with:
+
+```sh
+KICAD_SYMBOL_DIR=.kicad/symbols uv run wiring
+```
+
 The generated project at [`kicad/hof_frame`](kicad/hof_frame) shows the
 external holder, converter, and battery-sense module on its first sheet. Open
 the **Hierarchy Navigator** with **View > Panels > Hierarchy Navigator**
@@ -173,6 +193,14 @@ external schematic and full KiCad netlist with `kicad-cli` installed:
 
 ```sh
 KICAD_SYMBOL_DIR=.kicad/symbols uv run wiring --kicad
+```
+
+Use `--kicad DIR` to write the project to `DIR/hof_frame` instead. To check
+the generated connections and regeneration behavior, run from the repository
+root:
+
+```sh
+KICAD_SYMBOL_DIR=.kicad/symbols uv run python -m unittest discover -s docs/wiring_model/tests -p test_wiring_schematic.py
 ```
 
 The `hof_frame.json` circuit-synth model uses abstract board connectors for the

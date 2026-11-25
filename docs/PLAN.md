@@ -195,6 +195,13 @@ The frame is designed around the 7.3-inch panel (170.2 × 111.2 × 0.91 mm outli
 - USB-C access for flashing.
 - Rear cover, service access, and wall/stand mounting.
 
+The [parametric enclosure](enclosure/hof_frame.fs) centers its outer frame on
+the display opening for equal visible borders. **Minimum border outside panel**
+controls the minimum clearance from the panel to the outside of the frame; the
+visible borders are wider. **Inner front round-over radius** rounds the opening
+while leaving the outer corners square; set it to zero for a flat front. Check
+the fit and print a test section before printing the full enclosure.
+
 ## Firmware behavior
 
 Target the XIAO ESP32-S3 Plus using an ESP-IDF-backed Rust project (`esp-idf-svc`). This is preferred over a pure `esp-hal` implementation because Wi-Fi, the HTTP server and deep-sleep support are the highest-risk requirements.

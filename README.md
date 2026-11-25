@@ -1,70 +1,40 @@
-# hof_frame
+# Hall of Fame frame
 
-Hall of Fame frame with E-ink display
+The Hall of Fame frame displays your photo on a color e-ink screen. To change
+the photo, use a phone or computer to connect directly to the frame.
 
-1. [Detailed plan can be found here](docs/PLAN.md).
-2. [Electrical documentation can be found here](docs/WIRING.md).
-3. [Firmware (ESP-IDF-backed Rust) can be found here](firmware/README.md).
-4. [Parametric Onshape enclosure](docs/enclosure/hof_frame.fs).
+## Put a photo on the frame
 
-The enclosure centers its outer frame on the display opening for equal visible
-borders. **Minimum border outside panel** controls the minimum clearance from
-the panel to the outside of the frame; the visible borders are wider. The
-**Inner front round-over radius** rounds the opening while leaving the outer
-corners square (set it to zero for a flat front). Check the fit and print a
-test section before printing the full enclosure.
+1. **Get the Wi-Fi password.** Ask the person who introduced you to the frame
+   for its password.
+2. **Turn on the hotspot.** Press and hold the frame's button (KEY0) for
+   three seconds, then release it.
+3. **Connect to Wi-Fi.** On your phone or computer, join **HOF-Frame** using
+   the password. Stay connected even if your device says there is no internet.
+4. **Open the upload page.** In your browser, visit
+   [http://bursztynki.local](http://bursztynki.local). If that address does not
+   open, try [http://192.168.4.1](http://192.168.4.1). You do not need an
+   internet connection.
+5. **Choose and send a photo.** Select a PNG or JPEG up to 7 MB, choose the
+   orientation and fit you want, and press the upload button. The page starts
+   in Polish; use the language selector at the top to switch to English.
+6. **Wait and check the frame.** Keep the frame powered and your device
+   connected to its Wi-Fi while the page processes the photo and updates the
+   display. When the page reports success, check that your photo appears on the
+   frame. You can then return to your usual Wi-Fi.
 
-## Wiring source of truth
+The hotspot closes if an upload is not started within five minutes. If it
+closes before you start, hold the button for three seconds again. If the
+connection is lost during an upload, check the frame before trying again: the
+outcome may be unknown.
 
-The proposed electrical connections are modeled in code with
-[circuit-synth](https://www.circuit-synth.com/) in
-[`docs/wiring_model/`](docs/wiring_model). [`docs/WIRING.md`](docs/WIRING.md)
-provides the connection schedule, bill of materials, and bring-up instructions.
+## Documentation
 
-The Python environment uses [uv](https://docs.astral.sh/uv/). circuit-synth
-requires KiCad's `Connector_Generic` and `power` symbol libraries. Download them to the
-git-ignored `.kicad/symbols` directory:
-
-```sh
-mkdir -p .kicad/symbols
-for lib in Connector_Generic power; do
-  curl -fsSL "https://gitlab.com/kicad/libraries/kicad-symbols/-/raw/9.0.0/$lib.kicad_sym" \
-    -o ".kicad/symbols/$lib.kicad_sym"
-done
-```
-
-Then print the net list:
-
-```sh
-KICAD_SYMBOL_DIR=.kicad/symbols uv run wiring
-```
-
-Save your edits and close the KiCad schematic editor before generating the
-project in `docs/kicad/hof_frame` (requires `kicad-cli`):
-
-```sh
-KICAD_SYMBOL_DIR=.kicad/symbols uv run wiring --kicad
-```
-
-`--kicad DIR` writes to `DIR/hof_frame` instead. Regeneration replaces the
-generated top-level schematic, its PDF (`hof_frame.pdf`, the project wiring page
-only, without Seeed's pages, for viewing without KiCad), circuit-synth JSON, and
-full KiCad netlist. It
-preserves project settings and vendor circuitry, updating only project-specific
-page metadata in the vendor hierarchy. Before replacing files, it checks for
-an open editor and for changes made during generation. Open the `.kicad_pro` in
-KiCad; see the
-[wiring documentation](docs/WIRING.md#kicad-wiring-model) for hierarchy
-navigation, attribution, and the distinction between the model and full netlist.
-
-The bundled Seeed schematic is an **EE04 V1.2 snapshot** and is not automatically
-updated. Before using this wiring, check the
-[Seeed wiki's Resources section](https://wiki.seeedstudio.com/epaper_ee04/#resources)
-for schematic revisions and confirm your board's revision; newer revisions may
-require different wiring.
-
-To check the generated connections and regeneration behavior:
-
-```sh
-KICAD_SYMBOL_DIR=.kicad/symbols uv run python -m unittest discover -s docs/wiring_model/tests -p test_wiring_schematic.py
-```
+- [Project plan](docs/PLAN.md) — hardware, design, and intended behavior.
+- [Wiring and bill of materials](docs/WIRING.md) — connections, power safety,
+  bring-up, and KiCad model.
+- [Firmware guide](firmware/README.md) — flashing, uploads, troubleshooting,
+  and development.
+- [Firmware state machine](firmware/STATE_MACHINE.md) — button gestures,
+  upload flow, and recovery.
+- [Parametric Onshape enclosure](docs/enclosure/hof_frame.fs) — frame design.
