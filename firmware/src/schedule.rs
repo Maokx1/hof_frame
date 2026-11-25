@@ -68,4 +68,9 @@ impl RefreshSchedule {
     pub fn defer_retry(&mut self, now_us: u64, interval_us: u64) {
         self.retry_after_us = now_us.saturating_add(interval_us);
     }
+
+    /// Remove the retry cooldown after a manual latch acknowledgement.
+    pub fn clear_retry(&mut self) {
+        self.retry_after_us = 0;
+    }
 }

@@ -15,8 +15,9 @@ const RELEASE_TIMEOUT: Duration = Duration::from_secs(60);
 pub type Button = PinDriver<'static, RtcInput>;
 
 /// Sample KEY0 until its bounded gesture classifier reaches a decision.
-pub fn classify(button: &Button, wake_at: Instant) -> Gesture {
-    let mut classifier = GestureClassifier::new(wake_at, button.is_low());
+/// A latched boot replaces the upload hold with the clear-latch hold.
+pub fn classify(button: &Button, wake_at: Instant, latched: bool) -> Gesture {
+    let mut classifier = GestureClassifier::new(wake_at, button.is_low(), latched);
     loop {
         if let Some(gesture) = classifier.sample(Instant::now(), button.is_low()) {
             return gesture;

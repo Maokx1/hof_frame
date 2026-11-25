@@ -3,6 +3,7 @@ use std::time::{Duration, Instant};
 pub const BUTTON_DEBOUNCE: Duration = Duration::from_millis(50);
 pub const GESTURE_WINDOW: Duration = Duration::from_secs(3);
 pub const LONG_HOLD: Duration = Duration::from_secs(3);
+pub const CLEAR_LATCH_HOLD: Duration = Duration::from_secs(10);
 
 /// Requires a stable release before accepting the next waking press.
 #[derive(Default)]
@@ -76,6 +77,8 @@ pub enum Gesture {
     Upload,
     /// Request a manual refresh after three presses.
     ManualRefresh,
+    /// Acknowledge and clear the safety latch after a long waking hold.
+    ClearLatch,
 }
 
 pub struct GestureClassifier {
@@ -86,12 +89,19 @@ pub struct GestureClassifier {
     waking_press_held: bool,
     gesture_deadline: Instant,
     hold_deadline: Instant,
+    hold_gesture: Gesture,
     result: Option<Gesture>,
 }
 
 impl GestureClassifier {
     /// Count the waking press and start the gesture/hold deadlines.
-    pub fn new(wake_at: Instant, initially_pressed: bool) -> Self {
+    /// A latched boot extends the hold to the clear-latch acknowledgement.
+    pub fn new(wake_at: Instant, initially_pressed: bool, latched: bool) -> Self {
+        let (hold_gesture, hold_deadline) = if latched {
+            (Gesture::ClearLatch, wake_at + CLEAR_LATCH_HOLD)
+        } else {
+            (Gesture::Upload, wake_at + LONG_HOLD)
+        };
         Self {
             presses: 1,
             stable_pressed: initially_pressed,
@@ -99,7 +109,8 @@ impl GestureClassifier {
             candidate_since: wake_at,
             waking_press_held: initially_pressed,
             gesture_deadline: wake_at + GESTURE_WINDOW,
-            hold_deadline: wake_at + LONG_HOLD,
+            hold_deadline,
+            hold_gesture,
             result: None,
         }
     }
@@ -133,7 +144,7 @@ impl GestureClassifier {
             && self.candidate_pressed
             && now >= self.hold_deadline
         {
-            self.result = Some(Gesture::Upload);
+            self.result = Some(self.hold_gesture);
         }
         if now >= self.gesture_deadline && !(self.waking_press_held && self.stable_pressed) {
             self.result = Some(Gesture::Sleep);

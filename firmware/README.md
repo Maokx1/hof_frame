@@ -131,8 +131,17 @@ The EE04 user buttons KEY0/GPIO2, KEY1/GPIO3, and KEY2/GPIO5 are active-low
 inputs: released HIGH, pressed LOW. Button debounce is 50 ms.
 
 - Hold the waking KEY0 press for three seconds to open the upload window.
+  Deep-sleep boot time (~1.5 s) precedes classification, so the physical hold
+  is about five seconds from the button press.
 - Three presses within three seconds, counting the waking press, request a
   real refresh of the saved photo with Wi-Fi off.
+- When the persistent safety latch is set, hold the waking KEY0 press for ten
+  seconds (about twelve seconds physically) to acknowledge and clear the
+  latch. Shorter holds do nothing while latched; the upload window requires a
+  Clean state. The acknowledgement commits Clean, retains the last recorded
+  fault, clears the retry cooldown, and returns to sleep without starting
+  work. Only acknowledge after confirming stable power; the operator replaces
+  the unimplemented automated recovery-voltage measurement.
 - Other KEY0 gestures do no work. Held KEY0 must be released before rearming.
 - In USB mode, press KEY1 while idle to toggle the **simulated fault**. It
   starts OFF each boot. Holding KEY1 does not repeatedly toggle it.
@@ -203,8 +212,13 @@ session; reboot starts a new USB session. KEY1 cannot perform that runtime recov
 remain blocked across reboot. NVS read/write failures still block boot and
 never trigger automatic partition erasure.
 
-There is no production latch acknowledgement until qualified battery recovery
-checks exist. Raw state and transitions are logged. A missing record initializes
+A latched board can be acknowledged on-device: hold the waking KEY0 press for
+ten seconds (see Buttons). The long hold is the qualified manual
+acknowledgement; the operator asserts stable power because automated
+recovery-voltage measurement is not implemented. The acknowledgement commits
+Clean, retains the `last_fault_v1` evidence, clears the retry cooldown, and
+returns to sleep without starting work.
+Raw state and transitions are logged. A missing record initializes
 first use; external erasure cannot be
 distinguished from first use. Power-loss guarantees still need qualification.
 

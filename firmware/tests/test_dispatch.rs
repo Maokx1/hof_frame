@@ -70,3 +70,26 @@ fn manual_limit_does_not_block_upload_or_automatic_refresh() {
         Decision::Refresh { manual: false }
     );
 }
+
+#[test]
+fn clear_latch_gesture_acknowledges_only_when_latched() {
+    let schedule = RefreshSchedule::new(0);
+    for blocked in [false, true] {
+        assert_eq!(
+            decide(
+                Some(Gesture::ClearLatch),
+                SafetyState::Latched,
+                blocked,
+                schedule,
+                0
+            ),
+            Decision::ClearLatch
+        );
+    }
+    for safety in [SafetyState::Clean, SafetyState::Working] {
+        assert_eq!(
+            decide(Some(Gesture::ClearLatch), safety, false, schedule, 0),
+            Decision::Sleep
+        );
+    }
+}

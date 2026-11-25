@@ -52,16 +52,20 @@ impl Application {
         let reset = ResetReason::get();
         let wake = WakeupReason::get();
         Epd::disable_panel_power()?;
+        let safety = safety_nvs::open("hof_safety", reset == ResetReason::Brownout)?;
         let gesture = if reset == ResetReason::DeepSleep && wake == WakeupReason::Button {
-            Some(buttons::classify(&button, wake_at))
+            Some(buttons::classify(
+                &button,
+                wake_at,
+                safety.state() == SafetyState::Latched,
+            ))
         } else {
             None
         };
         let now_us = rtc::now_us();
         rtc::initialize(now_us);
-        let safety = safety_nvs::open("hof_safety", reset == ResetReason::Brownout)?;
         if safety.state() != SafetyState::Clean {
-            log::error!("persistent safety latch set; refresh/upload blocked; battery recovery measurement is not implemented, so acknowledgement is unavailable");
+            log::error!("persistent safety latch set; refresh/upload blocked; hold the waking KEY0 press for 10 s to acknowledge after confirming stable power");
             rtc::update(|state| state.schedule.defer_retry(now_us, DAILY_INTERVAL_US));
         }
         log::info!("firmware booting; reset reason: {reset:?}, wakeup reason: {wake:?}");
@@ -113,7 +117,7 @@ impl Application {
     }
 
     /// Translate the pure work decision into a production state and diagnostic log.
-    fn dispatch(&self) -> State {
+    fn dispatch(&mut self) -> State {
         let now_us = rtc::now_us();
         let schedule = rtc::retained().schedule;
         match dispatch::decide(
@@ -136,7 +140,19 @@ impl Application {
                 State::Refresh { manual }
             }
             Decision::Blocked => {
-                log::warn!("work suppressed by safety latch or interrupted-work recovery cooldown; calibrated battery acknowledgement remains unavailable");
+                log::warn!("work suppressed by safety latch or interrupted-work recovery cooldown; hold the waking KEY0 press for 10 s to acknowledge a latch");
+                State::PrepareSleep
+            }
+            Decision::ClearLatch => {
+                // The long hold is the qualified manual acknowledgement; the
+                // operator asserts stable power because automated
+                // recovery-voltage measurement is not implemented.
+                work::require(self.safety.acknowledge(true, true));
+                rtc::update(|state| {
+                    state.refresh_in_progress = 0;
+                    state.schedule.clear_retry();
+                });
+                log::warn!("manual latch acknowledgement: KEY0 held for 10 s; hof_safety committed Clean; last recorded fault retained; returning to sleep, work resumes on the next wake");
                 State::PrepareSleep
             }
             Decision::RateLimited => {

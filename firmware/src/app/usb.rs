@@ -160,7 +160,11 @@ impl Application {
     /// Classify a waking press and translate pure policy into the next state.
     fn classify(&mut self, wake_at: Instant) -> State {
         log::info!("mock Boot: KEY0 wake, press 1");
-        let gesture = buttons::classify(&self.button, wake_at);
+        let gesture = buttons::classify(
+            &self.button,
+            wake_at,
+            self.safety.state() == SafetyState::Latched,
+        );
         log::info!(
             "KEY0 gesture test: {gesture:?} after {:.3} s; panel OFF, Wi-Fi OFF",
             wake_at.elapsed().as_secs_f32()
@@ -175,8 +179,16 @@ impl Application {
             Decision::Upload => State::Upload(wake_at),
             Decision::Refresh { manual } => State::Refresh { manual },
             Decision::Blocked => {
-                log::warn!("USB: work BLOCKED; simulated fault={}; runtime safety={:?}; no acknowledgement performed",
+                log::warn!("USB: work BLOCKED; simulated fault={}; runtime safety={:?}; hold the waking KEY0 press for 10 s to acknowledge a latch",
                     self.simulated_fault, self.safety.state());
+                State::PrepareSleep
+            }
+            Decision::ClearLatch => {
+                // Same manual acknowledgement as production, applied to the
+                // development hof_usb namespace; a reboot also resets it.
+                work::require(self.safety.acknowledge(true, true));
+                self.schedule.clear_retry();
+                log::warn!("USB: manual latch acknowledgement: KEY0 held for 10 s; hof_usb committed Clean; last recorded fault retained");
                 State::PrepareSleep
             }
             Decision::RateLimited => {

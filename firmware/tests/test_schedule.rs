@@ -171,3 +171,13 @@ fn failed_manual_override_does_not_clear_recovery_cooldown() {
     assert!(schedule.cooling_down(20));
     assert!(schedule.manual_allowed(20, 50));
 }
+
+#[test]
+fn clear_retry_removes_cooldown_without_moving_schedule() {
+    let mut schedule = RefreshSchedule::new(0);
+    schedule.defer_retry(10, 100);
+    assert!(schedule.cooling_down(50));
+    schedule.clear_retry();
+    assert!(!schedule.cooling_down(50));
+    assert_eq!(schedule.deadline_us(1_000), 1_000);
+}

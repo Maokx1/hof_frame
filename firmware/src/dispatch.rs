@@ -18,6 +18,8 @@ pub enum Decision {
     Upload,
     /// Refresh the display, manually or on schedule.
     Refresh { manual: bool },
+    /// Acknowledge and clear the safety latch without starting work.
+    ClearLatch,
 }
 
 /// Select work from a gesture; absent gestures represent automatic refreshes.
@@ -32,6 +34,14 @@ pub fn decide(
     if gesture == Some(Gesture::Sleep) {
         return Decision::Sleep;
     }
+    // Latch acknowledgement must stay reachable while work is blocked.
+    if gesture == Some(Gesture::ClearLatch) {
+        return if safety == SafetyState::Latched {
+            Decision::ClearLatch
+        } else {
+            Decision::Sleep
+        };
+    }
     if blocked || safety != SafetyState::Clean {
         return Decision::Blocked;
     }
@@ -42,6 +52,6 @@ pub fn decide(
         }
         Some(Gesture::ManualRefresh) => Decision::Refresh { manual: true },
         None => Decision::Refresh { manual: false },
-        Some(Gesture::Sleep) => Decision::Sleep,
+        Some(Gesture::Sleep) | Some(Gesture::ClearLatch) => Decision::Sleep,
     }
 }

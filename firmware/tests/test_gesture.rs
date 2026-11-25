@@ -46,7 +46,7 @@ fn fault_switch_held_at_boot_does_not_toggle() {
 #[test]
 fn waking_press_held_for_three_seconds_requests_upload() {
     let wake_at = Instant::now();
-    let mut classifier = GestureClassifier::new(wake_at, true);
+    let mut classifier = GestureClassifier::new(wake_at, true, false);
 
     assert_eq!(classifier.sample(at(wake_at, 2_999), true), None);
     assert_eq!(
@@ -58,7 +58,7 @@ fn waking_press_held_for_three_seconds_requests_upload() {
 #[test]
 fn triple_press_within_window_requests_manual_refresh() {
     let wake_at = Instant::now();
-    let mut classifier = GestureClassifier::new(wake_at, true);
+    let mut classifier = GestureClassifier::new(wake_at, true, false);
 
     assert_eq!(classifier.sample(at(wake_at, 100), false), None);
     assert_eq!(classifier.sample(at(wake_at, 150), false), None);
@@ -76,7 +76,7 @@ fn triple_press_within_window_requests_manual_refresh() {
 #[test]
 fn button_bounce_shorter_than_debounce_does_not_count_as_press() {
     let wake_at = Instant::now();
-    let mut classifier = GestureClassifier::new(wake_at, false);
+    let mut classifier = GestureClassifier::new(wake_at, false, false);
 
     assert_eq!(classifier.sample(at(wake_at, 10), true), None);
     assert_eq!(classifier.sample(at(wake_at, 40), false), None);
@@ -95,7 +95,7 @@ fn button_bounce_shorter_than_debounce_does_not_count_as_press() {
 #[test]
 fn incomplete_gesture_returns_to_sleep_after_window() {
     let wake_at = Instant::now();
-    let mut classifier = GestureClassifier::new(wake_at, true);
+    let mut classifier = GestureClassifier::new(wake_at, true, false);
 
     assert_eq!(classifier.sample(at(wake_at, 100), false), None);
     assert_eq!(classifier.sample(at(wake_at, 150), false), None);
@@ -112,7 +112,7 @@ fn incomplete_gesture_returns_to_sleep_after_window() {
 #[test]
 fn third_press_not_debounced_by_window_deadline_returns_to_sleep() {
     let wake_at = Instant::now();
-    let mut classifier = GestureClassifier::new(wake_at, true);
+    let mut classifier = GestureClassifier::new(wake_at, true, false);
 
     assert_eq!(classifier.sample(at(wake_at, 100), false), None);
     assert_eq!(classifier.sample(at(wake_at, 150), false), None);
@@ -130,7 +130,7 @@ fn third_press_not_debounced_by_window_deadline_returns_to_sleep() {
 #[test]
 fn waking_press_released_before_three_seconds_does_not_request_upload() {
     let wake_at = Instant::now();
-    let mut classifier = GestureClassifier::new(wake_at, true);
+    let mut classifier = GestureClassifier::new(wake_at, true, false);
 
     assert_eq!(classifier.sample(at(wake_at, 1_000), false), None);
     assert_eq!(classifier.sample(at(wake_at, 1_050), false), None);
@@ -143,7 +143,7 @@ fn waking_press_released_before_three_seconds_does_not_request_upload() {
 #[test]
 fn pending_release_at_hold_deadline_does_not_open_upload() {
     let wake_at = Instant::now();
-    let mut classifier = GestureClassifier::new(wake_at, true);
+    let mut classifier = GestureClassifier::new(wake_at, true, false);
 
     assert_eq!(classifier.sample(at(wake_at, 2_990), false), None);
     assert_eq!(classifier.sample(at(wake_at, 3_000), false), None);
@@ -156,7 +156,7 @@ fn pending_release_at_hold_deadline_does_not_open_upload() {
 #[test]
 fn short_release_bounce_does_not_cancel_waking_hold() {
     let wake_at = Instant::now();
-    let mut classifier = GestureClassifier::new(wake_at, true);
+    let mut classifier = GestureClassifier::new(wake_at, true, false);
 
     assert_eq!(classifier.sample(at(wake_at, 2_990), false), None);
     assert_eq!(classifier.sample(at(wake_at, 3_000), false), None);
@@ -169,7 +169,7 @@ fn short_release_bounce_does_not_cancel_waking_hold() {
 #[test]
 fn already_released_waking_click_still_counts_as_press_one() {
     let wake_at = Instant::now();
-    let mut classifier = GestureClassifier::new(wake_at, false);
+    let mut classifier = GestureClassifier::new(wake_at, false, false);
 
     assert_eq!(classifier.sample(at(wake_at, 100), true), None);
     assert_eq!(classifier.sample(at(wake_at, 150), true), None);
@@ -185,7 +185,7 @@ fn already_released_waking_click_still_counts_as_press_one() {
 #[test]
 fn holding_second_press_is_not_an_upload_gesture() {
     let wake_at = Instant::now();
-    let mut classifier = GestureClassifier::new(wake_at, false);
+    let mut classifier = GestureClassifier::new(wake_at, false, false);
 
     assert_eq!(classifier.sample(at(wake_at, 100), true), None);
     assert_eq!(classifier.sample(at(wake_at, 150), true), None);
@@ -198,7 +198,7 @@ fn holding_second_press_is_not_an_upload_gesture() {
 #[test]
 fn third_press_debounced_exactly_at_deadline_is_accepted_once() {
     let wake_at = Instant::now();
-    let mut classifier = GestureClassifier::new(wake_at, false);
+    let mut classifier = GestureClassifier::new(wake_at, false, false);
 
     assert_eq!(classifier.sample(at(wake_at, 100), true), None);
     assert_eq!(classifier.sample(at(wake_at, 150), true), None);
@@ -218,7 +218,7 @@ fn third_press_debounced_exactly_at_deadline_is_accepted_once() {
 #[test]
 fn timeout_is_terminal_even_if_further_presses_arrive() {
     let wake_at = Instant::now();
-    let mut classifier = GestureClassifier::new(wake_at, false);
+    let mut classifier = GestureClassifier::new(wake_at, false, false);
 
     assert_eq!(
         classifier.sample(at(wake_at, 3_000), false),
@@ -250,4 +250,48 @@ fn release_gate_rejects_held_and_bouncing_presses_and_rearms_after_release() {
     assert!(!gate.sample(start + std::time::Duration::from_secs(8), false));
     assert!(!gate.sample(start + std::time::Duration::from_millis(8050), false));
     assert!(gate.sample(start + std::time::Duration::from_millis(8051), true));
+}
+
+#[test]
+fn latched_hold_requests_clear_latch_only_after_ten_seconds() {
+    let wake_at = Instant::now();
+    let mut classifier = GestureClassifier::new(wake_at, true, true);
+
+    assert_eq!(classifier.sample(at(wake_at, 3_000), true), None);
+    assert_eq!(classifier.sample(at(wake_at, 9_999), true), None);
+    assert_eq!(
+        classifier.sample(at(wake_at, 10_000), true),
+        Some(Gesture::ClearLatch)
+    );
+}
+
+#[test]
+fn latched_hold_released_before_ten_seconds_returns_to_sleep() {
+    let wake_at = Instant::now();
+    let mut classifier = GestureClassifier::new(wake_at, true, true);
+
+    assert_eq!(classifier.sample(at(wake_at, 5_000), true), None);
+    assert_eq!(classifier.sample(at(wake_at, 5_100), false), None);
+    assert_eq!(
+        classifier.sample(at(wake_at, 5_200), false),
+        Some(Gesture::Sleep)
+    );
+}
+
+#[test]
+fn latched_triple_press_still_requests_manual_refresh() {
+    let wake_at = Instant::now();
+    let mut classifier = GestureClassifier::new(wake_at, true, true);
+
+    assert_eq!(classifier.sample(at(wake_at, 100), false), None);
+    assert_eq!(classifier.sample(at(wake_at, 150), false), None);
+    assert_eq!(classifier.sample(at(wake_at, 300), true), None);
+    assert_eq!(classifier.sample(at(wake_at, 350), true), None);
+    assert_eq!(classifier.sample(at(wake_at, 500), false), None);
+    assert_eq!(classifier.sample(at(wake_at, 550), false), None);
+    assert_eq!(classifier.sample(at(wake_at, 700), true), None);
+    assert_eq!(
+        classifier.sample(at(wake_at, 750), true),
+        Some(Gesture::ManualRefresh)
+    );
 }
